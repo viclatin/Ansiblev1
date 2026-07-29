@@ -1,10 +1,17 @@
 ## Summary
+## Summary
 - What changed?
-- Why is this change needed?
+- Why is this needed?
 
 ## Validation
-- [ ] CI checks are green
-- [ ] Local lint/syntax checks were run
+- [ ] CI checks passed
+- [ ] Local lint/syntax checks run
+- [ ] No secrets or sensitive data included
+
+## Notes
+- Any rollout, rollback, or follow-up steps?
+- Any known limitations?
+
 - [ ] Relevant playbooks or scripts were reviewed
 
 ## Risk
