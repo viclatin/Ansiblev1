@@ -1,0 +1,424 @@
+---
+- name: Cisco IOS Health Assessment
+  hosts: cisco
+  gather_facts: false
+
+  tasks:
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Get hostname
+      cisco.ios.ios_command:
+        commands:
+          - show running-config | include ^hostname
+      register: hostname_info
+
+    - name: Gather health information
+      cisco.ios.ios_command:
+        commands:
+          - show version
+          - show ip int brief
+          - show processes cpu sorted | include CPU utilization
+          - show memory statistics
+      register: health_data
+
+    - name: Collect interfaces output
+      cisco.ios.ios_command:
+        commands:
+          - show interfaces
+      register: interfaces_full
+      failed_when: false
+
+    - name: Collect environment output
+      cisco.ios.ios_command:
+        commands:
+          - show environment all
+      register: env_full
+      failed_when: false
+
+    - name: Collect switch/stack output
+      cisco.ios.ios_command:
+        commands:
+          - show switch
+      register: switch_full
+      failed_when: false
+
+    - name: Collect spanning-tree output
+      cisco.ios.ios_command:
+        commands:
+          - show spanning-tree summary
+      register: stp_full
+      failed_when: false
+
+    - name: Collect logging output
+      cisco.ios.ios_command:
+        commands:
+          - show logging
+      register: logging_full
+      failed_when: false
+
+    - name: Collect NTP output
+      cisco.ios.ios_command:
+        commands:
+          - show ntp status
+      register: ntp_full
+      failed_when: false
+
+    - name: Collect OSPF neighbors
+      cisco.ios.ios_command:
+        commands:
+          - show ip ospf neighbor
+      register: ospf_full
+      failed_when: false
+
+    - name: Collect BGP summary
+      cisco.ios.ios_command:
+        commands:
+          - show ip bgp summary
+      register: bgp_full
+      failed_when: false
+
+    - name: Collect inventory
+      cisco.ios.ios_command:
+        commands:
+          - show inventory
+      register: inventory_full
+      failed_when: false
+
+    - name: Extract memory line
+      set_fact:
+        memory_line: "{{ (health_data.stdout[3] | default('') | split('\n') | select('match', '^Processor') | list | first) | default('') }}"
+
+    - name: Parse CPU and memory metrics
+      set_fact:
+        cpu_metrics:
+          raw_output: "{{ health_data.stdout[2] | default('') }}"
+          five_seconds_used_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
+          five_seconds_idle_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$', '\\2')) | default('0') | float | round(2)) }}"
+          one_minute_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*one minute: ([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
+          five_minutes_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five minutes: ([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
+        memory_metrics:
+          raw_output: "{{ health_data.stdout[3] | default('') }}"
+          total_bytes: "{{ ((memory_line | default('') | split() | default([]))[2] | default('0') | int) }}"
+          used_bytes: "{{ ((memory_line | default('') | split() | default([]))[3] | default('0') | int) }}"
+          free_bytes: "{{ ((memory_line | default('') | split() | default([]))[4] | default('0') | int) }}"
+          used_percent: "{{ (((memory_line | default('') | split() | default([]))[3] | default('0') | int) * 100 / (((memory_line | default('') | split() | default([]))[2] | default('1') | int))) | round(2) }}"
+
+    - name: Build interface errors check
+      set_fact:
+        interface_check:
+          raw_output: "{{ interfaces_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = interfaces_full.stdout[0] | default('') %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif output | lower | regex_search('input errors|output errors|crc|error', multiline=True) %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+          details: "Interface counters inspected"
+
+    - name: Build environmental check (temperature / sensors)
+      set_fact:
+        environmental_check:
+          raw_output: "{{ env_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = env_full.stdout[0] | default('') %}
+            {% set lower = output | lower %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif lower | regex_search('alarm|critical|warning|fault|fail|not\s+ok|shutdown', multiline=True) %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+          details: "Environment sensors inspected"
+
+    - name: Build power & fans check
+      set_fact:
+        power_check:
+          raw_output: "{{ env_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = env_full.stdout[0] | default('') %}
+            {% set lower = output | lower %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif lower | regex_search('(fan|power).*(fail|fault|off|down|not\s+present|not\s+ok)|offline|fault|fail', multiline=True) %}
+            critical
+            {% else %}
+            ok
+            {% endif %}
+          details: "Power and fan status"
+
+    - name: Build stack state check
+      set_fact:
+        stack_check:
+          raw_output: "{{ switch_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = switch_full.stdout[0] | default('') %}
+            {% set lower = output | lower %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif lower | regex_search('inconsistent|mismatch|not\s+ready|removed|down|fail|fault', multiline=True) %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+          details: "Stack membership and role"
+
+    - name: Build spanning-tree check
+      set_fact:
+        stp_check:
+          raw_output: "{{ stp_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = stp_full.stdout[0] | default('') %}
+            {% set lower = output | lower %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif lower | regex_search('loop|inconsistent|errdisable|bpduguard|root\s+inconsistent|error|failure', multiline=True) %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+          details: "Spanning-tree summary"
+
+    - name: Build logging events check
+      set_fact:
+        logging_check:
+          raw_output: "{{ logging_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = logging_full.stdout[0] | default('') %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif output | regex_search('ERROR|CRITICAL|SEVERE|ALERT', multiline=True) %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+          details: "Recent log events"
+
+    - name: Build NTP check
+      set_fact:
+        ntp_check:
+          raw_output: "{{ ntp_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = ntp_full.stdout[0] | default('') %}
+            {% set lower = output | lower %}
+            {% if output | trim == '' %}
+            not_supported
+            {% elif 'unsynchronized' in lower %}
+            warning
+            {% elif 'synchronized' in lower %}
+            ok
+            {% else %}
+            warning
+            {% endif %}
+          details: "NTP synchronization status"
+
+    - name: Build OSPF neighbor check
+      set_fact:
+        ospf_check:
+          raw_output: "{{ ospf_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = ospf_full.stdout[0] | default('') %}
+            {% if output | trim == '' %}
+            not_applicable
+            {% elif output | regex_search('Full|Full/\\w+|Full\\(\\w+\\)', multiline=True) %}
+            ok
+            {% else %}
+            warning
+            {% endif %}
+          details: "OSPF neighbor state"
+
+    - name: Build BGP neighbor check
+      set_fact:
+        bgp_check:
+          raw_output: "{{ bgp_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = bgp_full.stdout[0] | default('') %}
+            {% if output | trim == '' %}
+            not_applicable
+            {% elif output | regex_search('State\\s+|Established|Up', multiline=True) %}
+            ok
+            {% else %}
+            warning
+            {% endif %}
+          details: "BGP neighbor state"
+
+    - name: Build hardware/inventory check
+      set_fact:
+        inventory_check:
+          raw_output: "{{ inventory_full.stdout[0] | default('') }}"
+          status: >-
+            {% set output = inventory_full.stdout[0] | default('') %}
+            {% if output | trim == '' %}
+            not_supported
+            {% else %}
+            ok
+            {% endif %}
+          details: "Inventory / hardware presence"
+
+    - name: Active ICMP probe to 8.8.8.8
+      cisco.ios.ios_command:
+        commands:
+          - ping 8.8.8.8 repeat 5
+      register: ping_8
+      failed_when: false
+
+    - name: Parse ping 8.8.8.8 results
+      set_fact:
+        ping_8_metrics:
+          raw_output: '{{ ping_8.stdout[0] | default("") }}'
+          success_percent: >-
+            {% set output = ping_8.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {{ (matches | first | default('0')) | int }}
+          packet_loss_percent: >-
+            {% set output = ping_8.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {% set success_percent = (matches | first | default('0')) | int %}
+            {{ 100 - success_percent }}
+          rtt_avg_ms: >-
+            {% set output = ping_8.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {{ (matches | first | default('0')) | float }}
+          latency_band: >-
+            {% set output = ping_8.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {% set avg = (matches | first | default('0')) | float %}
+            {% if avg <= 30 %}
+            low
+            {% elif avg >= 60 and avg <= 100 %}
+            medium
+            {% elif avg >= 120 %}
+            high
+            {% else %}
+            unclassified
+            {% endif %}
+          status: >-
+            {% set output = ping_8.stdout[0] | default('') %}
+            {% set smatches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {% set success_percent = (smatches | first | default('0')) | int %}
+            {% set rmatches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {% set avg = (rmatches | first | default('0')) | float %}
+            {% set loss = 100 - success_percent %}
+            {% if loss >= 20 %}
+            critical
+            {% elif loss >= 5 %}
+            warning
+            {% elif avg >= 300 %}
+            critical
+            {% elif avg >= 100 %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+
+    - name: Traceroute to 8.8.8.8
+      cisco.ios.ios_command:
+        commands:
+          - traceroute 8.8.8.8
+      register: tr_8
+      failed_when: false
+
+    - name: Active ICMP probe to 8.8.4.4
+      cisco.ios.ios_command:
+        commands:
+          - ping 8.8.4.4 repeat 5
+      register: ping_8_4
+      failed_when: false
+
+    - name: Parse ping 8.8.4.4 results
+      set_fact:
+        ping_8_4_metrics:
+          raw_output: '{{ ping_8_4.stdout[0] | default("") }}'
+          success_percent: >-
+            {% set output = ping_8_4.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {{ (matches | first | default('0')) | int }}
+          packet_loss_percent: >-
+            {% set output = ping_8_4.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {% set success_percent = (matches | first | default('0')) | int %}
+            {{ 100 - success_percent }}
+          rtt_avg_ms: >-
+            {% set output = ping_8_4.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {{ (matches | first | default('0')) | float }}
+          latency_band: >-
+            {% set output = ping_8_4.stdout[0] | default('') %}
+            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {% set avg = (matches | first | default('0')) | float %}
+            {% if avg <= 30 %}
+            low
+            {% elif avg >= 60 and avg <= 100 %}
+            medium
+            {% elif avg >= 120 %}
+            high
+            {% else %}
+            unclassified
+            {% endif %}
+          status: >-
+            {% set output = ping_8_4.stdout[0] | default('') %}
+            {% set smatches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
+            {% set success_percent = (smatches | first | default('0')) | int %}
+            {% set rmatches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
+            {% set avg = (rmatches | first | default('0')) | float %}
+            {% set loss = 100 - success_percent %}
+            {% if loss >= 20 %}
+            critical
+            {% elif loss >= 5 %}
+            warning
+            {% elif avg >= 300 %}
+            critical
+            {% elif avg >= 100 %}
+            warning
+            {% else %}
+            ok
+            {% endif %}
+
+    - name: Traceroute to 8.8.4.4
+      cisco.ios.ios_command:
+        commands:
+          - traceroute 8.8.4.4
+      register: tr_8_4
+      failed_when: false
+
+    - name: Build health report
+      set_fact:
+        health_report:
+          hostname: "{{ ansible_net_hostname | default(hostname_info.stdout[0] | regex_replace('hostname ', '')) }}"
+          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
+          cpu_output: "{{ cpu_metrics }}"
+          memory_output: "{{ memory_metrics }}"
+          cpu_raw_output: "{{ health_data.stdout[2] | default('') }}"
+          memory_raw_output: "{{ health_data.stdout[3] | default('') }}"
+          ios_version: "{{ health_data.stdout[0] }}"
+          interfaces_output: "{{ health_data.stdout[1] }}"
+          checks:
+            interface_errors: "{{ interface_check }}"
+            environmental_status: "{{ environmental_check }}"
+            power_and_fans: "{{ power_check }}"
+            stack_state: "{{ stack_check }}"
+            spanning_tree: "{{ stp_check }}"
+            logging_events: "{{ logging_check }}"
+            ntp: "{{ ntp_check }}"
+            ospf_neighbors: "{{ ospf_check }}"
+            bgp_neighbors: "{{ bgp_check }}"
+            inventory: "{{ inventory_check }}"
+            probes:
+              ping_8_8_8_8: "{{ ping_8_metrics | default({}) }}"
+              traceroute_8_8_8_8: "{{ tr_8.stdout[0] | default('') }}"
+              ping_8_8_4_4: "{{ ping_8_4_metrics | default({}) }}"
+              traceroute_8_8_4_4: "{{ tr_8_4.stdout[0] | default('') }}"
+
+    - name: Write health report
+      delegate_to: localhost
+      copy:
+        content: "{{ health_report | to_nice_json }}"
+        dest: "../reports/{{ ansible_net_hostname | default(inventory_hostname) }}_health.json"
+
+    - name: Display health report
+      debug:
+        var: health_report

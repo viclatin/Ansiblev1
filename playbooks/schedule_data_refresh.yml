@@ -1,0 +1,38 @@
+---
+- name: Schedule data refresh pipeline on control node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    schedule_minute: "0"
+    schedule_hour: "*"
+    schedule_day: "*"
+    schedule_month: "*"
+    schedule_weekday: "*"
+    schedule_job_name: "ansible-network-data-refresh"
+    schedule_command: "/home/victor/ansible/scripts/run_scheduled_analysis.sh"
+
+  tasks:
+    - name: Ensure scheduler runner is executable
+      ansible.builtin.file:
+        path: "{{ schedule_command }}"
+        mode: "0755"
+
+    - name: Ensure automation log directory exists
+      ansible.builtin.file:
+        path: /home/victor/ansible/reports/automation/scheduler-logs
+        state: directory
+        mode: "0755"
+
+    - name: Create or update cron schedule for data refresh
+      ansible.builtin.cron:
+        name: "{{ schedule_job_name }}"
+        minute: "{{ schedule_minute }}"
+        hour: "{{ schedule_hour }}"
+        day: "{{ schedule_day }}"
+        month: "{{ schedule_month }}"
+        weekday: "{{ schedule_weekday }}"
+        job: "{{ schedule_command }}"
+        user: victor
+        state: present

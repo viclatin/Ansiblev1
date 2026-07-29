@@ -1,0 +1,150 @@
+---
+- name: Cisco IOS Compliance Validation
+  hosts: cisco
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/standards.yml
+
+  tasks:
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Gather running configuration
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+      register: running_config
+
+    - name: Initialize compliance results
+      set_fact:
+        compliance_results: {}
+
+    - name: Evaluate standards
+      set_fact:
+        compliance_results: >-
+          {{
+            compliance_results |
+            combine({
+              item.key:
+              (
+                'PASS'
+                if (
+                  (
+                    (item.value.expected_state | default('present')) == 'present'
+                    and
+                    (
+                      (
+                        item.value.pattern is defined
+                        and
+                        item.value.pattern in running_config.stdout[0]
+                      )
+                      or
+                      (
+                        item.value.regex is defined
+                        and
+                        running_config.stdout[0]
+                        is regex(item.value.regex, multiline=True)
+                      )
+                    )
+                  )
+                  or
+                  (
+                    (item.value.expected_state | default('present')) == 'absent'
+                    and
+                    not (
+                      (
+                        item.value.pattern is defined
+                        and
+                        item.value.pattern in running_config.stdout[0]
+                      )
+                      or
+                      (
+                        item.value.regex is defined
+                        and
+                        running_config.stdout[0]
+                        is regex(item.value.regex, multiline=True)
+                      )
+                    )
+                  )
+                )
+                else 'FAIL'
+              )
+            })
+          }}
+      loop: "{{ compliance_checks | dict2items }}"
+
+
+    - name: Show compliance results
+      debug:
+        var: compliance_results
+
+    - name: Count passed and total checks
+      set_fact:
+        passed_checks: "{{ compliance_results.values() | select('equalto', 'PASS') | list | length }}"
+        total_checks: "{{ compliance_results | length }}"
+
+    - name: Calculate compliance score
+      set_fact:
+        compliance_score: "{{ 0 if (total_checks | int) == 0 else (((passed_checks | int) * 100 / (total_checks | int)) | round(0)) }}"
+
+    - name: Generate failed controls list
+      set_fact:
+        failed_controls: >-
+          {{
+            compliance_results
+            | dict2items
+            | selectattr('value', 'equalto', 'FAIL')
+            | map(attribute='key')
+            | list
+          }}
+
+    - name: Generate passed controls list
+      set_fact:
+        passed_controls: >-
+          {{
+            compliance_results
+            | dict2items
+            | selectattr('value', 'equalto', 'PASS')
+            | map(attribute='key')
+            | list
+          }}
+
+    - name: Determine compliance status
+      set_fact:
+        compliance_status: >-
+          {% if compliance_score | int >= 90 %}
+          COMPLIANT
+          {% elif compliance_score | int >= 70 %}
+          PARTIAL
+          {% else %}
+          NON_COMPLIANT
+          {% endif %}
+
+    - name: Build compliance report
+      set_fact:
+        compliance_report:
+          hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
+          compliance_score: "{{ compliance_score | int }}"
+          compliance_status: "{{ compliance_status | trim }}"
+          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
+          total_controls: "{{ total_checks | int }}"
+          passed_controls: "{{ passed_controls }}"
+          failed_controls: "{{ failed_controls }}"
+          results: "{{ compliance_results }}"
+
+    - name: Write compliance report to JSON
+      delegate_to: localhost
+      copy:
+        content: "{{ compliance_report | to_nice_json }}"
+        dest: "../reports/{{ ansible_net_hostname | default(inventory_hostname) }}_compliance.json"
+
+    - name: Display Results
+      debug:
+        msg:
+          hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
+          compliance_score: "{{ compliance_score }}"
+          compliance_status: "{{ compliance_status | trim }}"
+          passed_controls: "{{ passed_controls }}"
+          failed_controls: "{{ failed_controls }}"
+          results: "{{ compliance_results }}"

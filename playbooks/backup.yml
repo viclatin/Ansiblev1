@@ -1,0 +1,19 @@
+---
+- name: Backup Cisco Configuration
+  hosts: cisco
+  gather_facts: no
+
+  tasks:
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Collect running config
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+      register: running_config
+
+    - name: Save config to file
+      copy:
+        content: "{{ running_config.stdout[0] }}"
+        dest: "/home/victor/ansible/backups/{{ ansible_net_hostname | default(inventory_hostname) }}.cfg"

@@ -1,0 +1,55 @@
+---
+compliance_checks:
+  AAA:
+    id: AAA-001
+    category: authentication
+    description: "AAA must be enabled for centralized authentication."
+    severity: high
+    remediation: "Configure aaa new-model and authentication methods."
+    expected_state: present
+    regex: "^aaa new-model"
+
+  NTP:
+    id: NTP-001
+    category: time_sync
+    description: "NTP must be configured for reliable time synchronization."
+    severity: medium
+    remediation: "Configure at least one NTP server."
+    expected_state: present
+    regex: "^ntp server"
+
+  SNMP:
+    id: SNMP-001
+    category: monitoring
+    description: "SNMP should be configured for device monitoring."
+    severity: medium
+    remediation: "Configure SNMP community strings or user-based authentication."
+    expected_state: present
+    regex: "^snmp-server"
+
+  SYSLOG:
+    id: SYSLOG-001
+    category: logging
+    description: "System logging should be configured for auditing."
+    severity: medium
+    remediation: "Configure syslog servers and logging facilities."
+    expected_state: present
+    regex: "^logging host"
+
+  SSH:
+    id: SSH-001
+    category: access
+    description: "SSH should be the preferred management transport."
+    severity: high
+    remediation: "Ensure SSH transport is configured for management access."
+    expected_state: present
+    regex: "^ transport input ssh"
+
+  HTTP:
+    id: HTTP-001
+    category: management
+    description: "HTTP server should be disabled and HTTPS used instead."
+    severity: high
+    remediation: "Remove the HTTP server configuration and use secure HTTPS management."
+    expected_state: absent
+    regex: '^ip http server'

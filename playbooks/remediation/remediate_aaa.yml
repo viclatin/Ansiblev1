@@ -1,0 +1,83 @@
+---
+- name: Remediate AAA Control
+  hosts: cisco
+  gather_facts: false
+
+  vars:
+    backups_dir: "{{ playbook_dir }}/../../backups"
+    reports_dir: "{{ playbook_dir }}/../../reports"
+    control_name: AAA
+    control_id: AAA-001
+    control_description: Enable AAA for centralized authentication.
+    compliance_criteria:
+      pass: aaa new-model present
+      fail: aaa new-model missing
+    risk_of_non_compliance: High - weak or inconsistent device access control.
+    remediation_commands:
+      - aaa new-model
+    validation_commands:
+      - show running-config | include ^aaa new-model
+    rollback_procedure: Restore the pre-remediation backup file saved in backups/.
+    expected_outcome: Device configuration contains aaa new-model.
+    report_suffix: aaa_remediation.json
+
+  tasks:
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Capture pre-remediation running configuration
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+      register: pre_config
+
+    - name: Build remediation timestamp
+      set_fact:
+        run_ts: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Save pre-remediation backup
+      delegate_to: localhost
+      copy:
+        content: "{{ pre_config.stdout[0] }}"
+        dest: "{{ backups_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_AAA_pre_{{ run_ts }}.cfg"
+
+    - name: Apply AAA remediation
+      cisco.ios.ios_config:
+        lines: "{{ remediation_commands }}"
+
+    - name: Validate AAA remediation
+      cisco.ios.ios_command:
+        commands: "{{ validation_commands }}"
+      register: validation_output
+
+    - name: Evaluate AAA compliance state
+      set_fact:
+        remediation_success: "{{ validation_output.stdout[0] is regex('^aaa new-model', multiline=True) }}"
+
+    - name: Build AAA remediation report
+      set_fact:
+        remediation_report:
+          control_name: "{{ control_name }}"
+          control_id: "{{ control_id }}"
+          hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
+          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
+          control_description: "{{ control_description }}"
+          compliance_criteria: "{{ compliance_criteria }}"
+          risk_of_non_compliance: "{{ risk_of_non_compliance }}"
+          remediation_commands: "{{ remediation_commands }}"
+          validation_commands: "{{ validation_commands }}"
+          validation_output: "{{ validation_output.stdout[0] | default('') }}"
+          rollback_procedure: "{{ rollback_procedure }}"
+          expected_outcome: "{{ expected_outcome }}"
+          status: "{{ 'PASS' if remediation_success else 'FAIL' }}"
+
+    - name: Write AAA remediation report
+      delegate_to: localhost
+      copy:
+        content: "{{ remediation_report | to_nice_json }}"
+        dest: "{{ reports_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_{{ report_suffix }}"
+
+    - name: Fail if AAA remediation did not pass validation
+      fail:
+        msg: "AAA remediation failed validation. Review remediation report and backup for rollback."
+      when: not remediation_success

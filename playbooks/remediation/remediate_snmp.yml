@@ -1,0 +1,85 @@
+---
+- name: Remediate SNMP Control
+  hosts: cisco
+  gather_facts: false
+
+  vars:
+    backups_dir: "{{ playbook_dir }}/../../backups"
+    reports_dir: "{{ playbook_dir }}/../../reports"
+    control_name: SNMP
+    control_id: SNMP-001
+    snmp_community: victor
+    snmp_access: RO
+    control_description: Configure SNMP community for monitoring access.
+    compliance_criteria:
+      pass: "snmp-server community {{ snmp_community }} {{ snmp_access }} present"
+      fail: SNMP community line missing
+    risk_of_non_compliance: Medium - reduced monitoring visibility.
+    remediation_commands:
+      - "snmp-server community {{ snmp_community }} {{ snmp_access }}"
+    validation_commands:
+      - "show running-config | include ^snmp-server community {{ snmp_community }}"
+    rollback_procedure: Restore the pre-remediation backup file saved in backups/.
+    expected_outcome: SNMP community line is present in running configuration.
+    report_suffix: snmp_remediation.json
+
+  tasks:
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Capture pre-remediation running configuration
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+      register: pre_config
+
+    - name: Build remediation timestamp
+      set_fact:
+        run_ts: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Save pre-remediation backup
+      delegate_to: localhost
+      copy:
+        content: "{{ pre_config.stdout[0] }}"
+        dest: "{{ backups_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_SNMP_pre_{{ run_ts }}.cfg"
+
+    - name: Apply SNMP remediation
+      cisco.ios.ios_config:
+        lines: "{{ remediation_commands }}"
+
+    - name: Validate SNMP remediation
+      cisco.ios.ios_command:
+        commands: "{{ validation_commands }}"
+      register: validation_output
+
+    - name: Evaluate SNMP compliance state
+      set_fact:
+        remediation_success: "{{ validation_output.stdout[0] is regex('^snmp-server community ' ~ snmp_community | regex_escape ~ ' ', multiline=True) }}"
+
+    - name: Build SNMP remediation report
+      set_fact:
+        remediation_report:
+          control_name: "{{ control_name }}"
+          control_id: "{{ control_id }}"
+          hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
+          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
+          control_description: "{{ control_description }}"
+          compliance_criteria: "{{ compliance_criteria }}"
+          risk_of_non_compliance: "{{ risk_of_non_compliance }}"
+          remediation_commands: "{{ remediation_commands }}"
+          validation_commands: "{{ validation_commands }}"
+          validation_output: "{{ validation_output.stdout[0] | default('') }}"
+          rollback_procedure: "{{ rollback_procedure }}"
+          expected_outcome: "{{ expected_outcome }}"
+          status: "{{ 'PASS' if remediation_success else 'FAIL' }}"
+
+    - name: Write SNMP remediation report
+      delegate_to: localhost
+      copy:
+        content: "{{ remediation_report | to_nice_json }}"
+        dest: "{{ reports_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_{{ report_suffix }}"
+
+    - name: Fail if SNMP remediation did not pass validation
+      fail:
+        msg: "SNMP remediation failed validation. Review remediation report and backup for rollback."
+      when: not remediation_success

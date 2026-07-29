@@ -1,0 +1,7 @@
+ansible-core
+ansible-lint
+yamllint
+ruff
+pytest
+pydantic-ai
+ollama

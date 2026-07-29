@@ -1,0 +1,11 @@
+line-length = 120
+
+exclude = [
+  "scripts/venv",
+  "backups",
+  "reports",
+]
+
+[lint]
+# Start with correctness-focused checks; expand later once baseline is clean.
+select = ["E9", "F63", "F7", "F82"]

@@ -1,0 +1,24 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+scripts/venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Ansible local/cache data
+.ansible/
+
+# Generated outputs
+reports/
+backups/
+
+# OS/editor noise
+.DS_Store
+*.swp
