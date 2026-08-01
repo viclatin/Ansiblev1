@@ -2,6 +2,8 @@
 - name: Apply approved Cisco IOS-XE syslog standard
   hosts: remediation_targets
   gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
 
   tasks:
     - name: Configure approved syslog destination

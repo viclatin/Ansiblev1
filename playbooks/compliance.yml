@@ -2,6 +2,8 @@
 - name: Cisco IOS Compliance Validation
   hosts: cisco
   gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
 
   vars_files:
     - ../group_vars/standards.yml

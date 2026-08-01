@@ -79,11 +79,11 @@ def main() -> int:
     steps: list[tuple[str, list[str]]] = [
         (
             "compliance_playbook",
-            ["ansible-playbook", "-i", "inventories/cisco.ini", "playbooks/compliance.yml"],
+            ["ansible-playbook", "-i", "inventories/test/hosts.ini", "playbooks/compliance.yml"],
         ),
         (
             "health_playbook",
-            ["ansible-playbook", "-i", "inventories/cisco.ini", "playbooks/healthcheck.yml"],
+            ["ansible-playbook", "-i", "inventories/test/hosts.ini", "playbooks/healthcheck.yml"],
         ),
         ("powerbi_export", [py, "scripts/export_powerbi.py"]),
     ]

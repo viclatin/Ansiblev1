@@ -2,6 +2,8 @@
 - name: Roll back Cisco IOS-XE syslog change
   hosts: remediation_targets
   gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
 
   tasks:
     - name: Remove the approved syslog destination

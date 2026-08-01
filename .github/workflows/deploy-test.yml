@@ -3,6 +3,11 @@ name: Deploy Change to Test
 
 run-name: Test ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
 
+# Applies the change: takes a fresh pre-change backup, then remediates,
+# validates, and re-checks compliance on the test device. Run
+# deploy-test-review.yml first and review its diff/job summary before
+# running this workflow.
+
 on:
   workflow_dispatch:
     inputs:
@@ -30,7 +35,7 @@ jobs:
       - network-test
 
     environment:
-      name: test
+      name: network-test
 
     steps:
       - name: Check out exact merged commit
@@ -40,46 +45,82 @@ jobs:
 
       - name: Install Ansible dependencies
         run: |
-          python3 -m pip install -r requirements-dev.txt
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
           ansible-galaxy collection install -r requirements.yml
+
+      - name: Write device connection credentials
+        env:
+          ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
+          ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
+          ANSIBLE_NET_ENABLE_PASSWORD: ${{ secrets.ANSIBLE_NET_ENABLE_PASSWORD }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import json
+          import os
+
+          vars_path = os.path.join(os.environ["RUNNER_TEMP"], "test_device_vars.json")
+          data = {
+            "ansible_user": os.environ["ANSIBLE_NET_USERNAME"],
+            "ansible_password": os.environ["ANSIBLE_NET_PASSWORD"],
+            "ansible_become_password": os.environ.get("ANSIBLE_NET_ENABLE_PASSWORD", ""),
+          }
+          with open(vars_path, "w", encoding="utf-8") as f:
+              json.dump(data, f)
+          print(f"Wrote {vars_path}")
+          PY
 
       - name: Validate change manifest policy
         run: |
+          . .venv/bin/activate
           pytest -q tests/test_change_manifests.py
 
       - name: Back up test device
         id: backup
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/backup.yml
 
       - name: Run test pre-check
         id: precheck
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/compliance.yml
 
       - name: Apply approved remediation in test
         id: remediate
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/remediation/remediate_syslog.yml
 
       - name: Validate test remediation
         id: validate
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/validation/validate_syslog.yml
 
       - name: Re-run test compliance
         id: postcheck
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/compliance.yml
 
       - name: Generate test result manifest
@@ -92,6 +133,7 @@ jobs:
           VALIDATE_STATUS: ${{ steps.validate.outcome }}
           POSTCHECK_STATUS: ${{ steps.postcheck.outcome }}
         run: |
+          . .venv/bin/activate
           mkdir -p artifacts
           python3 - <<'PY'
           import json
@@ -126,3 +168,8 @@ jobs:
             reports/
             artifacts/test-result-${{ inputs.change_id }}.json
           retention-days: 30
+
+      - name: Remove device connection credentials
+        if: always()
+        run: |
+          rm -f "${RUNNER_TEMP}/test_device_vars.json"

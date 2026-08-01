@@ -5,3 +5,4 @@ ruff
 pytest
 pydantic-ai
 ollama
+paramiko
