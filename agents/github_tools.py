@@ -202,7 +202,7 @@ def propose_remediation(hostname: str, control: str, remediation_id: str) -> str
     change_id = _build_change_id(normalized_control, hostname)
     branch_name = f"agent/remediation/{_slugify(change_id)}"
     evidence_report, report_data = _remediation_report_payload(normalized_control, hostname)
-    base_branch = _current_branch()
+    base_branch = "main"
 
     change_manifest = _render_change_manifest(
         change_id=change_id,
