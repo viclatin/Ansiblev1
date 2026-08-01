@@ -30,7 +30,7 @@ jobs:
       - network-test
 
     environment:
-      name: test
+      name: network-test
 
     steps:
       - name: Check out exact merged commit
@@ -40,16 +40,21 @@ jobs:
 
       - name: Install Ansible dependencies
         run: |
-          python3 -m pip install -r requirements-dev.txt
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
           ansible-galaxy collection install -r requirements.yml
 
       - name: Validate change manifest policy
         run: |
+          . .venv/bin/activate
           pytest -q tests/test_change_manifests.py
 
       - name: Back up test device
         id: backup
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
             playbooks/backup.yml
@@ -57,6 +62,7 @@ jobs:
       - name: Run test pre-check
         id: precheck
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
             playbooks/compliance.yml
@@ -64,6 +70,7 @@ jobs:
       - name: Apply approved remediation in test
         id: remediate
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
             playbooks/remediation/remediate_syslog.yml
@@ -71,6 +78,7 @@ jobs:
       - name: Validate test remediation
         id: validate
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
             playbooks/validation/validate_syslog.yml
@@ -78,6 +86,7 @@ jobs:
       - name: Re-run test compliance
         id: postcheck
         run: |
+          . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
             playbooks/compliance.yml
@@ -92,6 +101,7 @@ jobs:
           VALIDATE_STATUS: ${{ steps.validate.outcome }}
           POSTCHECK_STATUS: ${{ steps.postcheck.outcome }}
         run: |
+          . .venv/bin/activate
           mkdir -p artifacts
           python3 - <<'PY'
           import json
