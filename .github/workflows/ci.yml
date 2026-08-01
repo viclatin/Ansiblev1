@@ -24,7 +24,7 @@ jobs:
           python3 -m venv .venv-ci-ansible
           . .venv-ci-ansible/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install "ansible-core>=2.16,<2.18" "ansible-lint>=24.7.0" "yamllint>=1.35.1"
+          python -m pip install "ansible-core>=2.20,<2.22" "ansible-lint>=24.7.0" "yamllint>=1.35.1"
 
       - name: Install required collections
         run: |

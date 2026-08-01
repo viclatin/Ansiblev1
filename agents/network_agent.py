@@ -77,6 +77,19 @@ def backup() -> str:
     return run_backup()
 
 
+def run_remediation(control: str) -> str:
+    """Direct remediation execution is intentionally disabled in this agent."""
+    raise RuntimeError(
+        "Direct remediation execution is disabled. Use propose_remediation and "
+        "deployment workflows instead."
+    )
+
+
+def _normalize_status(value: object) -> str:
+    """Normalize status-like values for consistent conditional checks."""
+    return str(value).strip().lower() if value is not None else "unknown"
+
+
 def _is_remediation_intent(text: str) -> bool:
     """Detect operator intent to run guided remediation workflows."""
     normalized = text.lower().strip()
