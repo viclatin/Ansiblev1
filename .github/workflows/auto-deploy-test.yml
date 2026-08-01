@@ -17,6 +17,7 @@ on:
 permissions:
   actions: write
   contents: read
+  pull-requests: read
 
 concurrency:
   group: auto-test-deploy-${{ github.event.workflow_run.head_sha }}
@@ -36,11 +37,18 @@ jobs:
         with:
           script: |
             const run = context.payload.workflow_run;
-            const message = run.head_commit?.message ?? '';
-            const match = message.match(/\b(CHG-[A-Z0-9-]+)\b/);
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${run.head_branch}`,
+            });
+
+            const sourceText = prs.data[0]?.title ?? run.head_commit?.message ?? '';
+            const match = sourceText.match(/\b(CHG-[A-Z0-9-]+)\b/);
 
             if (!match) {
-              core.setFailed(`Unable to extract change_id from commit message: ${message}`);
+              core.setFailed(`Unable to extract change_id from PR title or commit message: ${sourceText}`);
               return;
             }
 
