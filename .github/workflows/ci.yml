@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -7,7 +10,10 @@ on:
 jobs:
   ansible-quality:
     name: Ansible quality gates
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - linux
+      - ci-validation
 
     steps:
       - name: Checkout
@@ -28,8 +34,8 @@ jobs:
 
       - name: Validate inventory files
         run: |
-          ansible-inventory -i inventories/cisco.ini --list > /dev/null
-          ansible-inventory -i inventories/network.ini --list > /dev/null
+          ansible-inventory -i inventories/test/hosts.ini --list > /dev/null
+          ansible-inventory -i inventories/production/hosts.ini --list > /dev/null
 
       - name: YAML lint (duplicate keys, invalid structure)
         run: yamllint -c .yamllint playbooks group_vars inventories
@@ -41,12 +47,15 @@ jobs:
         run: |
           while IFS= read -r playbook; do
             echo "Syntax checking ${playbook}"
-            ansible-playbook -i inventories/cisco.ini --syntax-check "${playbook}"
+            ansible-playbook -i inventories/test/hosts.ini --syntax-check "${playbook}"
           done < <(find playbooks -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
 
   python-quality:
     name: Python quality gates
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - linux
+      - ci-validation
 
     steps:
       - name: Checkout
@@ -60,7 +69,7 @@ jobs:
       - name: Install Python lint tooling
         run: |
           python -m pip install --upgrade pip
-          pip install "ruff>=0.6.0"
+          pip install "ruff>=0.6.0" "pytest>=8.0.0" "PyYAML>=6.0.0"
 
       - name: Python syntax checks
         run: |
@@ -70,3 +79,7 @@ jobs:
 
       - name: Ruff lint
         run: ruff check agents api scripts --exclude scripts/venv
+
+      - name: Run policy and schema tests
+        run: |
+          pytest -q tests/test_change_manifests.py

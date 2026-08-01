@@ -1,84 +1,12 @@
 ---
-- name: Remediate SYSLOG Control
-  hosts: cisco
+- name: Apply approved Cisco IOS-XE syslog standard
+  hosts: remediation_targets
   gather_facts: false
 
-  vars:
-    backups_dir: "{{ playbook_dir }}/../../backups"
-    reports_dir: "{{ playbook_dir }}/../../reports"
-    control_name: SYSLOG
-    control_id: SYSLOG-001
-    syslog_host: "2.2.2.2"
-    control_description: Configure remote syslog destination for centralized logging.
-    compliance_criteria:
-      pass: "logging host {{ syslog_host }} present"
-      fail: "logging host {{ syslog_host }} missing"
-    risk_of_non_compliance: Medium - reduced audit and event-correlation visibility.
-    remediation_commands:
-      - "logging host {{ syslog_host }}"
-    validation_commands:
-      - "show running-config | include ^logging host {{ syslog_host }}"
-    rollback_procedure: Restore the pre-remediation backup file saved in backups/.
-    expected_outcome: logging host line is present in running configuration.
-    report_suffix: syslog_remediation.json
-
   tasks:
-    - name: Gather IOS facts
-      cisco.ios.ios_facts:
-
-    - name: Capture pre-remediation running configuration
-      cisco.ios.ios_command:
-        commands:
-          - show running-config
-      register: pre_config
-
-    - name: Build remediation timestamp
-      set_fact:
-        run_ts: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
-
-    - name: Save pre-remediation backup
-      delegate_to: localhost
-      copy:
-        content: "{{ pre_config.stdout[0] }}"
-        dest: "{{ backups_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_SYSLOG_pre_{{ run_ts }}.cfg"
-
-    - name: Apply SYSLOG remediation
+    - name: Configure approved syslog destination
       cisco.ios.ios_config:
-        lines: "{{ remediation_commands }}"
-
-    - name: Validate SYSLOG remediation
-      cisco.ios.ios_command:
-        commands: "{{ validation_commands }}"
-      register: validation_output
-
-    - name: Evaluate SYSLOG compliance state
-      set_fact:
-        remediation_success: "{{ validation_output.stdout[0] is regex('^logging host ' ~ syslog_host | regex_escape, multiline=True) }}"
-
-    - name: Build SYSLOG remediation report
-      set_fact:
-        remediation_report:
-          control_name: "{{ control_name }}"
-          control_id: "{{ control_id }}"
-          hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
-          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
-          control_description: "{{ control_description }}"
-          compliance_criteria: "{{ compliance_criteria }}"
-          risk_of_non_compliance: "{{ risk_of_non_compliance }}"
-          remediation_commands: "{{ remediation_commands }}"
-          validation_commands: "{{ validation_commands }}"
-          validation_output: "{{ validation_output.stdout[0] | default('') }}"
-          rollback_procedure: "{{ rollback_procedure }}"
-          expected_outcome: "{{ expected_outcome }}"
-          status: "{{ 'PASS' if remediation_success else 'FAIL' }}"
-
-    - name: Write SYSLOG remediation report
-      delegate_to: localhost
-      copy:
-        content: "{{ remediation_report | to_nice_json }}"
-        dest: "{{ reports_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_{{ report_suffix }}"
-
-    - name: Fail if SYSLOG remediation did not pass validation
-      fail:
-        msg: "SYSLOG remediation failed validation. Review remediation report and backup for rollback."
-      when: not remediation_success
+        lines:
+          - logging host 2.2.2.2
+          - logging trap warnings
+        save_when: modified

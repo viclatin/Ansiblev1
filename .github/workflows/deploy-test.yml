@@ -1,0 +1,128 @@
+---
+name: Deploy Change to Test
+
+run-name: Test ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      change_id:
+        description: Change manifest identifier
+        required: true
+        type: string
+      commit_sha:
+        description: Merged commit SHA to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-test
+  cancel-in-progress: false
+
+jobs:
+  deploy-test:
+    runs-on:
+      - self-hosted
+      - linux
+      - network-test
+
+    environment:
+      name: test
+
+    steps:
+      - name: Check out exact merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Install Ansible dependencies
+        run: |
+          python3 -m pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Validate change manifest policy
+        run: |
+          pytest -q tests/test_change_manifests.py
+
+      - name: Back up test device
+        id: backup
+        run: |
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            playbooks/backup.yml
+
+      - name: Run test pre-check
+        id: precheck
+        run: |
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            playbooks/compliance.yml
+
+      - name: Apply approved remediation in test
+        id: remediate
+        run: |
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            playbooks/remediation/remediate_syslog.yml
+
+      - name: Validate test remediation
+        id: validate
+        run: |
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            playbooks/validation/validate_syslog.yml
+
+      - name: Re-run test compliance
+        id: postcheck
+        run: |
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            playbooks/compliance.yml
+
+      - name: Generate test result manifest
+        if: always()
+        env:
+          CHANGE_ID: ${{ inputs.change_id }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          JOB_STATUS: ${{ job.status }}
+          PRECHECK_STATUS: ${{ steps.precheck.outcome }}
+          VALIDATE_STATUS: ${{ steps.validate.outcome }}
+          POSTCHECK_STATUS: ${{ steps.postcheck.outcome }}
+        run: |
+          mkdir -p artifacts
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def as_compliance(step_outcome: str) -> str:
+            return "PASS" if step_outcome == "success" else "FAIL"
+
+          manifest = {
+            "change_id": os.environ["CHANGE_ID"],
+            "tested_commit_sha": os.environ["COMMIT_SHA"],
+            "test_status": "PASSED" if os.environ["JOB_STATUS"] == "success" else "FAILED",
+            "test_environment": "test",
+            "compliance_before": as_compliance(os.environ.get("PRECHECK_STATUS", "failure")),
+            "compliance_after": as_compliance(os.environ.get("POSTCHECK_STATUS", "failure")),
+            "validation_status": "PASSED" if os.environ.get("VALIDATE_STATUS") == "success" else "FAILED",
+            "rollback_tested": False,
+          }
+
+          output_path = Path("artifacts") / f"test-result-{manifest['change_id']}.json"
+          output_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          print(f"Wrote {output_path}")
+          PY
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ inputs.change_id }}
+          path: |
+            reports/
+            artifacts/test-result-${{ inputs.change_id }}.json
+          retention-days: 30
