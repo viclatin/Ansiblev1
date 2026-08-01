@@ -2,6 +2,8 @@
 - name: Backup Cisco Configuration
   hosts: cisco
   gather_facts: no
+  become: true
+  become_method: ansible.netcommon.enable
 
   tasks:
     - name: Gather IOS facts
