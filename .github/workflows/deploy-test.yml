@@ -32,6 +32,10 @@ jobs:
     environment:
       name: network-test
 
+    env:
+      ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
+      ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
+
     steps:
       - name: Check out exact merged commit
         uses: actions/checkout@v4
