@@ -1,0 +1,161 @@
+---
+name: Promote Tested Change to Production
+
+run-name: Production ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      change_id:
+        description: Approved change identifier
+        required: true
+        type: string
+      commit_sha:
+        description: Exact commit SHA successfully tested
+        required: true
+        type: string
+      test_run_id:
+        description: Workflow run ID that produced the test evidence artifact
+        required: true
+        type: string
+      target_group:
+        description: Approved production inventory group
+        required: true
+        type: choice
+        options:
+          - production_canary_switches
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: network-production
+  cancel-in-progress: false
+
+jobs:
+  verify-promotion:
+    runs-on:
+      - self-hosted
+      - linux
+      - ci-validation
+
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Download test evidence artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: test-evidence-${{ inputs.change_id }}
+          run-id: ${{ inputs.test_run_id }}
+          github-token: ${{ github.token }}
+          path: evidence
+
+      - name: Verify test result manifest
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest_path = Path("evidence") / f"test-result-${{ inputs.change_id }}.json"
+          data = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+          assert data["change_id"] == "${{ inputs.change_id }}"
+          assert data["tested_commit_sha"] == "${{ inputs.commit_sha }}"
+          assert data["test_status"] == "PASSED"
+          assert data["test_environment"] == "test"
+          assert data["compliance_before"] == "PASS"
+          assert data["compliance_after"] == "PASS"
+          assert data["validation_status"] == "PASSED"
+          assert data["rollback_tested"] is False
+          print(f"Verified {manifest_path}")
+          PY
+
+      - name: Verify change manifest and catalog alignment
+        run: |
+          python3 -m pip install -r requirements-dev.txt
+          pytest -q tests/test_change_manifests.py
+
+      - name: Build production approval summary
+        run: |
+          python3 scripts/build_deployment_summary.py \
+            --change-id "${{ inputs.change_id }}" \
+            --commit-sha "${{ inputs.commit_sha }}" \
+            --test-result "evidence/test-result-${{ inputs.change_id }}.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm promotion parameters
+        run: |
+          echo "Change ID: ${{ inputs.change_id }}"
+          echo "Tested SHA: ${{ inputs.commit_sha }}"
+          echo "Target group: ${{ inputs.target_group }}"
+
+  deploy-production:
+    needs:
+      - verify-promotion
+    runs-on:
+      - self-hosted
+      - linux
+      - network-production
+
+    environment:
+      name: production
+
+    steps:
+      - name: Check out exact tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Confirm target and tested SHA
+        run: |
+          echo "Change ID: ${{ inputs.change_id }}"
+          echo "Tested SHA: ${{ inputs.commit_sha }}"
+          echo "Target group: ${{ inputs.target_group }}"
+
+      - name: Back up production target
+        run: |
+          ansible-playbook \
+            -i inventories/production/hosts.ini \
+            playbooks/backup.yml \
+            --limit "${{ inputs.target_group }}"
+
+      - name: Run production pre-check
+        run: |
+          ansible-playbook \
+            -i inventories/production/hosts.ini \
+            playbooks/compliance.yml \
+            --limit "${{ inputs.target_group }}"
+
+      - name: Apply approved remediation
+        run: |
+          ansible-playbook \
+            -i inventories/production/hosts.ini \
+            playbooks/remediation/remediate_syslog.yml \
+            --limit "${{ inputs.target_group }}"
+
+      - name: Validate production remediation
+        run: |
+          ansible-playbook \
+            -i inventories/production/hosts.ini \
+            playbooks/validation/validate_syslog.yml \
+            --limit "${{ inputs.target_group }}"
+
+      - name: Re-run production compliance
+        run: |
+          ansible-playbook \
+            -i inventories/production/hosts.ini \
+            playbooks/compliance.yml \
+            --limit "${{ inputs.target_group }}"
+
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-evidence-${{ inputs.change_id }}
+          path: |
+            reports/
+          retention-days: 90

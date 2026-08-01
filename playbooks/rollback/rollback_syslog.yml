@@ -1,0 +1,12 @@
+---
+- name: Roll back Cisco IOS-XE syslog change
+  hosts: remediation_targets
+  gather_facts: false
+
+  tasks:
+    - name: Remove the approved syslog destination
+      cisco.ios.ios_config:
+        lines:
+          - no logging host 2.2.2.2
+          - no logging trap warnings
+        save_when: modified

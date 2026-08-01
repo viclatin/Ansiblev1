@@ -26,8 +26,13 @@ try:
         run_backup,
         run_compliance,
         run_health,
-        run_remediation,
         get_remediation_catalog,
+    )
+    from .github_tools import (
+        propose_remediation as _propose_remediation,
+        get_change_status as _get_change_status,
+        request_test_deployment as _request_test_deployment,
+        request_production_promotion as _request_production_promotion,
     )
 except ImportError:  # pragma: no cover - script execution fallback
     from prompts import SYSTEM_PROMPT
@@ -35,8 +40,13 @@ except ImportError:  # pragma: no cover - script execution fallback
         run_backup,
         run_compliance,
         run_health,
-        run_remediation,
         get_remediation_catalog,
+    )
+    from github_tools import (
+        propose_remediation as _propose_remediation,
+        get_change_status as _get_change_status,
+        request_test_deployment as _request_test_deployment,
+        request_production_promotion as _request_production_promotion,
     )
 
 
@@ -65,12 +75,6 @@ def health() -> str:
 def backup() -> str:
     """Run the Cisco IOS-XE configuration backup workflow."""
     return run_backup()
-
-
-def _normalize_status(value) -> str:
-    if value is None:
-        return "unknown"
-    return str(value).strip().lower()
 
 
 def _is_remediation_intent(text: str) -> bool:
@@ -115,6 +119,50 @@ def _extract_control_hints(text: str) -> List[str]:
     catalog = get_remediation_catalog()
     mentioned = [control for control in sorted(catalog.keys()) if control.lower() in token_set]
     return mentioned
+
+
+def _extract_remediation_id(text: str) -> str | None:
+    match = re.search(r"\b(REM-[A-Z]+-\d+)\b", text.upper())
+    return match.group(1) if match else None
+
+
+def _extract_hostname_hint(text: str) -> str | None:
+    match = re.search(r"\bon\s+([A-Za-z0-9_.-]+)", text, flags=re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+@agent.tool_plain
+def propose_remediation(hostname: str, control: str, remediation_id: str) -> str:
+    """Create a remediation proposal PR from repository-controlled evidence."""
+    return _propose_remediation(hostname=hostname, control=control, remediation_id=remediation_id)
+
+
+@agent.tool_plain
+def get_change_status(change_id: str) -> str:
+    """Return the current repository and workflow status for a change proposal."""
+    return _get_change_status(change_id=change_id)
+
+
+@agent.tool_plain
+def request_test_deployment(change_id: str, commit_sha: str) -> str:
+    """Request the GitHub Actions test deployment workflow."""
+    return _request_test_deployment(change_id=change_id, commit_sha=commit_sha)
+
+
+@agent.tool_plain
+def request_production_promotion(
+    change_id: str,
+    commit_sha: str,
+    test_run_id: str,
+    target_group: str = "production_canary_switches",
+) -> str:
+    """Request the GitHub Actions production promotion workflow."""
+    return _request_production_promotion(
+        change_id=change_id,
+        commit_sha=commit_sha,
+        test_run_id=test_run_id,
+        target_group=target_group,
+    )
 
 
 def _parse_interface_status(interfaces_output: str) -> dict:
@@ -728,11 +776,58 @@ def handle_direct_request(prompt: str):
         return _format_health_summary(run_health())
 
     if _is_remediation_intent(text):
-        return run_guided_remediation_flow(
-            prompt,
-            interactive=sys.stdin.isatty(),
-            preselected_controls=_extract_control_hints(text),
-        )
+        remediation_id = _extract_remediation_id(prompt)
+        hostname = _extract_hostname_hint(prompt)
+        control_hints = _extract_control_hints(text)
+        control = control_hints[0] if control_hints else None
+
+        if remediation_id and hostname and control:
+            try:
+                return propose_remediation(hostname=hostname, control=control, remediation_id=remediation_id)
+            except Exception as error:  # pragma: no cover - operational fallback
+                return "\n".join([
+                    "DEVICE",
+                    f"- Hostname: {hostname}",
+                    "- Workflow: remediation_proposal",
+                    "- Execution status: FAILED",
+                    "",
+                    "OBSERVED FINDINGS",
+                    f"- Proposal request failed: {type(error).__name__}: {error}",
+                    "",
+                    "ASSESSMENT",
+                    "- Overall status: PROPOSAL_NOT_CREATED",
+                    "- Operational risk: Controlled",
+                    "- Confidence: High",
+                    "",
+                    "RECOMMENDATIONS",
+                    "- Confirm gh authentication and repository push permissions",
+                    "- Retry with hostname, control, and remediation_id",
+                    "",
+                    "DATA LIMITATIONS",
+                    "- No configuration has been changed",
+                ])
+
+        return "\n".join([
+            "DEVICE",
+            "- Hostname: from change request",
+            "- Workflow: remediation_proposal",
+            "- Execution status: ROUTED_TO_GIT_WORKFLOW",
+            "",
+            "OBSERVED FINDINGS",
+            "- Remediation intent detected from user input",
+            "",
+            "ASSESSMENT",
+            "- Overall status: PENDING_CHANGE_PROPOSAL",
+            "- Operational risk: Controlled",
+            "- Confidence: High",
+            "",
+            "RECOMMENDATIONS",
+            "- Use propose_remediation with hostname, control, and remediation_id",
+            "- Review and approve via pull request workflow before any deployment",
+            "",
+            "DATA LIMITATIONS",
+            "- No configuration has been changed",
+        ])
 
     if any(keyword in text for keyword in ["compliance", "audit", "policy"]):
         compliance_raw = run_compliance()

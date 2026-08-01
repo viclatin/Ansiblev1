@@ -1,0 +1,19 @@
+---
+- name: Validate Cisco IOS-XE syslog standard
+  hosts: remediation_targets
+  gather_facts: false
+
+  tasks:
+    - name: Collect configured syslog lines
+      cisco.ios.ios_command:
+        commands:
+          - show running-config | include ^logging host|^logging trap
+      register: syslog_validation
+
+    - name: Verify approved syslog configuration exists
+      ansible.builtin.assert:
+        that:
+          - "'logging host 2.2.2.2' in syslog_validation.stdout[0]"
+          - "'logging trap warnings' in syslog_validation.stdout[0]"
+        fail_msg: Syslog validation failed
+        success_msg: Syslog validation passed

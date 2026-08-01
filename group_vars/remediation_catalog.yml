@@ -1,0 +1,37 @@
+---
+remediation_catalog:
+  REM-SYSLOG-001:
+    control: SYSLOG
+    description: Configure approved centralized syslog destination
+    severity: medium
+
+    playbook: playbooks/remediation/remediate_syslog.yml
+    validation_playbook: playbooks/validation/validate_syslog.yml
+    rollback_playbook: playbooks/rollback/rollback_syslog.yml
+
+    test_required: true
+    production_approval_required: true
+
+    supported_platforms:
+      - cisco_ios_xe
+
+    production_target_allowlist:
+      - production_canary_switches
+
+  REM-HTTP-001:
+    control: HTTP
+    description: Apply approved HTTP service state
+    severity: medium
+
+    playbook: playbooks/remediation/remediate_http.yml
+    validation_playbook: playbooks/validation/validate_http.yml
+    rollback_playbook: playbooks/rollback/rollback_http.yml
+
+    test_required: true
+    production_approval_required: true
+
+    supported_platforms:
+      - cisco_ios_xe
+
+    production_target_allowlist:
+      - production_canary_switches
