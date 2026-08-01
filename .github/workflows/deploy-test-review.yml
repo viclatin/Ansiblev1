@@ -1,0 +1,128 @@
+---
+name: Review Change for Test
+
+run-name: Review ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
+
+# Read-only: backs up the test device and previews (dry-run) the exact
+# running-config lines that playbooks/remediation/*.yml would add, without
+# applying anything. Run this first and review the diff in the job summary
+# before running deploy-test.yml to actually apply the change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      change_id:
+        description: Change manifest identifier
+        required: true
+        type: string
+      commit_sha:
+        description: Merged commit SHA to review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-test
+  cancel-in-progress: false
+
+jobs:
+  review-test:
+    runs-on:
+      - self-hosted
+      - linux
+      - network-test
+
+    environment:
+      name: network-test
+
+    steps:
+      - name: Check out exact merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Install Ansible dependencies
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Write device connection credentials
+        env:
+          ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
+          ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
+          ANSIBLE_NET_ENABLE_PASSWORD: ${{ secrets.ANSIBLE_NET_ENABLE_PASSWORD }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import json
+          import os
+
+          vars_path = os.path.join(os.environ["RUNNER_TEMP"], "test_device_vars.json")
+          data = {
+            "ansible_user": os.environ["ANSIBLE_NET_USERNAME"],
+            "ansible_password": os.environ["ANSIBLE_NET_PASSWORD"],
+            "ansible_become_password": os.environ.get("ANSIBLE_NET_ENABLE_PASSWORD", ""),
+          }
+          with open(vars_path, "w", encoding="utf-8") as f:
+              json.dump(data, f)
+          print(f"Wrote {vars_path}")
+          PY
+
+      - name: Validate change manifest policy
+        run: |
+          . .venv/bin/activate
+          pytest -q tests/test_change_manifests.py
+
+      - name: Back up test device
+        id: backup
+        run: |
+          . .venv/bin/activate
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
+            playbooks/backup.yml
+
+      - name: Preview remediation changes (dry run)
+        id: preview
+        run: |
+          . .venv/bin/activate
+          set -o pipefail
+          ansible-playbook \
+            -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
+            --check --diff \
+            playbooks/remediation/remediate_syslog.yml \
+            | tee "${RUNNER_TEMP}/remediation_preview.txt"
+
+      - name: Publish diff to job summary
+        if: always()
+        run: |
+          {
+            echo "## Pre-change diff for ${{ inputs.change_id }}"
+            echo
+            echo "No device configuration was changed by this run (--check mode)."
+            echo
+            echo '```diff'
+            cat "${RUNNER_TEMP}/remediation_preview.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload change review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: change-review-${{ inputs.change_id }}
+          path: |
+            backups/
+            ${{ runner.temp }}/remediation_preview.txt
+          retention-days: 30
+
+      - name: Remove device connection credentials
+        if: always()
+        run: |
+          rm -f "${RUNNER_TEMP}/test_device_vars.json"

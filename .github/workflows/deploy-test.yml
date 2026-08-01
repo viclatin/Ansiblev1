@@ -3,6 +3,11 @@ name: Deploy Change to Test
 
 run-name: Test ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
 
+# Applies the change: takes a fresh pre-change backup, then remediates,
+# validates, and re-checks compliance on the test device. Run
+# deploy-test-review.yml first and review its diff/job summary before
+# running this workflow.
+
 on:
   workflow_dispatch:
     inputs:

@@ -18,4 +18,4 @@
     - name: Save config to file
       copy:
         content: "{{ running_config.stdout[0] }}"
-        dest: "/home/victor/ansible/backups/{{ ansible_net_hostname | default(inventory_hostname) }}.cfg"
+        dest: "{{ playbook_dir }}/../backups/{{ ansible_net_hostname | default(inventory_hostname) }}.cfg"
