@@ -32,10 +32,6 @@ jobs:
     environment:
       name: network-test
 
-    env:
-      ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
-      ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
-
     steps:
       - name: Check out exact merged commit
         uses: actions/checkout@v4
@@ -50,6 +46,26 @@ jobs:
           python -m pip install -r requirements-dev.txt
           ansible-galaxy collection install -r requirements.yml
 
+      - name: Write device connection credentials
+        env:
+          ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
+          ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import json
+          import os
+
+          vars_path = os.path.join(os.environ["RUNNER_TEMP"], "test_device_vars.json")
+          data = {
+            "ansible_user": os.environ["ANSIBLE_NET_USERNAME"],
+            "ansible_password": os.environ["ANSIBLE_NET_PASSWORD"],
+          }
+          with open(vars_path, "w", encoding="utf-8") as f:
+              json.dump(data, f)
+          print(f"Wrote {vars_path}")
+          PY
+
       - name: Validate change manifest policy
         run: |
           . .venv/bin/activate
@@ -61,6 +77,7 @@ jobs:
           . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/backup.yml
 
       - name: Run test pre-check
@@ -69,6 +86,7 @@ jobs:
           . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/compliance.yml
 
       - name: Apply approved remediation in test
@@ -77,6 +95,7 @@ jobs:
           . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/remediation/remediate_syslog.yml
 
       - name: Validate test remediation
@@ -85,6 +104,7 @@ jobs:
           . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/validation/validate_syslog.yml
 
       - name: Re-run test compliance
@@ -93,6 +113,7 @@ jobs:
           . .venv/bin/activate
           ansible-playbook \
             -i inventories/test/hosts.ini \
+            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/compliance.yml
 
       - name: Generate test result manifest
@@ -140,3 +161,8 @@ jobs:
             reports/
             artifacts/test-result-${{ inputs.change_id }}.json
           retention-days: 30
+
+      - name: Remove device connection credentials
+        if: always()
+        run: |
+          rm -f "${RUNNER_TEMP}/test_device_vars.json"
