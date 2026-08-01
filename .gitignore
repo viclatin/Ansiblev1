@@ -16,7 +16,8 @@ scripts/venv/
 .ansible/
 
 # Generated outputs
-reports/
+reports/*
+!reports/Victors-Switch_compliance.json
 backups/
 
 # OS/editor noise
