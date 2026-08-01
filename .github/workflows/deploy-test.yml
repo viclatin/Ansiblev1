@@ -50,6 +50,7 @@ jobs:
         env:
           ANSIBLE_NET_USERNAME: ${{ secrets.ANSIBLE_NET_USERNAME }}
           ANSIBLE_NET_PASSWORD: ${{ secrets.ANSIBLE_NET_PASSWORD }}
+          ANSIBLE_NET_ENABLE_PASSWORD: ${{ secrets.ANSIBLE_NET_ENABLE_PASSWORD }}
         run: |
           umask 077
           python3 - <<'PY'
@@ -60,6 +61,7 @@ jobs:
           data = {
             "ansible_user": os.environ["ANSIBLE_NET_USERNAME"],
             "ansible_password": os.environ["ANSIBLE_NET_PASSWORD"],
+            "ansible_become_password": os.environ.get("ANSIBLE_NET_ENABLE_PASSWORD", ""),
           }
           with open(vars_path, "w", encoding="utf-8") as f:
               json.dump(data, f)
