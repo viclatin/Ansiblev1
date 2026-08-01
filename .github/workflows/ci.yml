@@ -19,32 +19,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11.9"
-
       - name: Install Ansible tooling
         run: |
+          python3 -m venv .venv-ci-ansible
+          . .venv-ci-ansible/bin/activate
           python -m pip install --upgrade pip
-          pip install "ansible-core>=2.16,<2.18" "ansible-lint>=24.7.0" "yamllint>=1.35.1"
+          python -m pip install "ansible-core>=2.20,<2.22" "ansible-lint>=24.7.0" "yamllint>=1.35.1"
 
       - name: Install required collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: |
+          . .venv-ci-ansible/bin/activate
+          ansible-galaxy collection install -r requirements.yml
 
       - name: Validate inventory files
         run: |
+          . .venv-ci-ansible/bin/activate
           ansible-inventory -i inventories/test/hosts.ini --list > /dev/null
           ansible-inventory -i inventories/production/hosts.ini --list > /dev/null
 
       - name: YAML lint (duplicate keys, invalid structure)
-        run: yamllint -c .yamllint playbooks group_vars inventories
+        run: |
+          . .venv-ci-ansible/bin/activate
+          yamllint -c .yamllint playbooks group_vars inventories
 
       - name: Ansible lint (undefined vars, play/task quality)
-        run: ansible-lint --strict playbooks
+        run: |
+          . .venv-ci-ansible/bin/activate
+          ansible-lint --strict playbooks
 
       - name: Ansible syntax checks
         run: |
+          . .venv-ci-ansible/bin/activate
           while IFS= read -r playbook; do
             echo "Syntax checking ${playbook}"
             ansible-playbook -i inventories/test/hosts.ini --syntax-check "${playbook}"
@@ -61,25 +66,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11.9"
-
       - name: Install Python lint tooling
         run: |
+          python3 -m venv .venv-ci-python
+          . .venv-ci-python/bin/activate
           python -m pip install --upgrade pip
-          pip install "ruff>=0.6.0" "pytest>=8.0.0" "PyYAML>=6.0.0"
+          python -m pip install "ruff>=0.6.0" "pytest>=8.0.0" "PyYAML>=6.0.0"
 
       - name: Python syntax checks
         run: |
+          . .venv-ci-python/bin/activate
           while IFS= read -r py_file; do
             python -m py_compile "${py_file}"
           done < <(find agents api scripts -type f -name '*.py' ! -path 'scripts/venv/*' | sort)
 
       - name: Ruff lint
-        run: ruff check agents api scripts --exclude scripts/venv
+        run: |
+          . .venv-ci-python/bin/activate
+          ruff check agents api scripts --exclude scripts/venv
 
       - name: Run policy and schema tests
         run: |
+          . .venv-ci-python/bin/activate
           pytest -q tests/test_change_manifests.py

@@ -1,0 +1,60 @@
+---
+name: Auto Dispatch Test Deployment
+
+# Bridge workflow: when proposal checks on an agent remediation branch
+# pass, dispatch the manual deploy workflow automatically for the exact
+# tested commit. This does not apply configuration itself.
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - "agent/remediation/**"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: auto-test-deploy-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  request-test-deployment:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'agent/remediation/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch deploy-test workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const message = run.head_commit?.message ?? '';
+            const match = message.match(/\b(CHG-[A-Z0-9-]+)\b/);
+
+            if (!match) {
+              core.setFailed(`Unable to extract change_id from commit message: ${message}`);
+              return;
+            }
+
+            const changeId = match[1];
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-test.yml',
+              ref: 'main',
+              inputs: {
+                change_id: changeId,
+                commit_sha: run.head_sha,
+              },
+            });
+
+            core.info(`Dispatched deploy-test.yml for ${changeId} at ${run.head_sha}`);

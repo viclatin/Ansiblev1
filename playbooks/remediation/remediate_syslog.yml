@@ -9,6 +9,7 @@
     - name: Configure approved syslog destination
       cisco.ios.ios_config:
         lines:
-          - logging host 2.2.2.2
+          - no logging trap
           - logging trap warnings
+          - logging host 2.2.2.2
         save_when: modified

@@ -9,8 +9,9 @@
     - name: Collect configured syslog lines
       cisco.ios.ios_command:
         commands:
-          - show running-config | include ^logging host
-          - show running-config | include ^logging trap
+          - show running-config | include ^logging host 2.2.2.2
+          - show running-config | include ^logging trap warnings
+          - show running-config | include ^no logging trap
       register: syslog_validation
 
     - name: Verify approved syslog configuration exists
@@ -18,5 +19,6 @@
         that:
           - "'logging host 2.2.2.2' in syslog_validation.stdout[0]"
           - "'logging trap warnings' in syslog_validation.stdout[1]"
+          - "'no logging trap' not in syslog_validation.stdout[2]"
         fail_msg: Syslog validation failed
         success_msg: Syslog validation passed
