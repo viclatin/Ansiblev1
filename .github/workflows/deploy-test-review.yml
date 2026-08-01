@@ -3,10 +3,14 @@ name: Review Change for Test
 
 run-name: Review ${{ inputs.change_id }} at ${{ inputs.commit_sha }}
 
-# Read-only: backs up the test device and previews (dry-run) the exact
-# running-config lines that playbooks/remediation/*.yml would add, without
-# applying anything. Run this first and review the diff in the job summary
-# before running deploy-test.yml to actually apply the change.
+# Read-only: backs up the test device, then compares that backup against
+# the running-config lines the change's remediation playbook would add
+# (no lines are pushed to the device). Note: cisco.ios.ios_config's own
+# --check/--diff mode cannot diff against the running-config (the module
+# explicitly disables it in check mode), so the comparison is done here
+# directly against the backup instead. Run this first and review the diff
+# in the job summary before running deploy-test.yml to actually apply the
+# change.
 
 on:
   workflow_dispatch:
@@ -87,17 +91,48 @@ jobs:
             --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
             playbooks/backup.yml
 
-      - name: Preview remediation changes (dry run)
+      - name: Preview remediation changes
         id: preview
+        env:
+          CHANGE_ID: ${{ inputs.change_id }}
         run: |
           . .venv/bin/activate
-          set -o pipefail
-          ansible-playbook \
-            -i inventories/test/hosts.ini \
-            --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
-            --check --diff \
-            playbooks/remediation/remediate_syslog.yml \
-            | tee "${RUNNER_TEMP}/remediation_preview.txt"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          import yaml
+
+          change_id = os.environ["CHANGE_ID"]
+          manifest = yaml.safe_load(Path(f"changes/{change_id}.yml").read_text(encoding="utf-8"))
+          playbook_path = Path(manifest["implementation"]["playbook"])
+          hostname = manifest["target"]["hostname"]
+
+          plays = yaml.safe_load(playbook_path.read_text(encoding="utf-8"))
+          proposed_lines: list[str] = []
+          for play in plays:
+              for task in play.get("tasks", []):
+                  config_args = task.get("cisco.ios.ios_config")
+                  if config_args and "lines" in config_args:
+                      proposed_lines.extend(config_args["lines"])
+
+          backup_path = Path("backups") / f"{hostname}.cfg"
+          current_lines = {
+              line.strip() for line in backup_path.read_text(encoding="utf-8").splitlines()
+          }
+
+          diff_lines = []
+          for line in proposed_lines:
+              if line.strip() in current_lines:
+                  diff_lines.append(f"  {line}   # already present, no change")
+              else:
+                  diff_lines.append(f"+ {line}   # would be added")
+
+          output_path = Path(os.environ["RUNNER_TEMP"]) / "remediation_preview.txt"
+          output_path.write_text("\n".join(diff_lines) + "\n", encoding="utf-8")
+          print(output_path.read_text(encoding="utf-8"))
+          PY
 
       - name: Publish diff to job summary
         if: always()
@@ -105,7 +140,7 @@ jobs:
           {
             echo "## Pre-change diff for ${{ inputs.change_id }}"
             echo
-            echo "No device configuration was changed by this run (--check mode)."
+            echo "Compares the backup taken above against the lines ${{ inputs.change_id }}'s remediation playbook would add. No device configuration was changed by this run."
             echo
             echo '```diff'
             cat "${RUNNER_TEMP}/remediation_preview.txt"
