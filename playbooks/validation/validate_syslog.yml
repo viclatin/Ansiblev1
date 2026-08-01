@@ -14,11 +14,15 @@
           - show running-config | include ^no logging trap
       register: syslog_validation
 
+    - name: Combine syslog output for validation
+      ansible.builtin.set_fact:
+        syslog_validation_combined: "{{ syslog_validation.stdout | join('\n') }}"
+
     - name: Verify approved syslog configuration exists
       ansible.builtin.assert:
         that:
-          - "'logging host 2.2.2.2' in syslog_validation.stdout[0]"
-          - "'logging trap warnings' in syslog_validation.stdout[1]"
-          - "'no logging trap' not in syslog_validation.stdout[2]"
+          - "'logging host 2.2.2.2' in syslog_validation_combined"
+          - "'logging trap warnings' in syslog_validation_combined"
+          - "'no logging trap' not in syslog_validation_combined"
         fail_msg: Syslog validation failed
         success_msg: Syslog validation passed
