@@ -1,0 +1,25 @@
+{
+    "compliance_score": 83,
+    "compliance_status": "PARTIAL",
+    "failed_controls": [
+        "SYSLOG"
+    ],
+    "hostname": "Victors-Switch",
+    "passed_controls": [
+        "AAA",
+        "NTP",
+        "SNMP",
+        "SSH",
+        "HTTP"
+    ],
+    "results": {
+        "AAA": "PASS",
+        "HTTP": "PASS",
+        "NTP": "PASS",
+        "SNMP": "PASS",
+        "SSH": "PASS",
+        "SYSLOG": "FAIL"
+    },
+    "timestamp": "2026-08-02T01:55:49+00:00",
+    "total_controls": 6
+}
