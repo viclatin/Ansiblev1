@@ -1,0 +1,24 @@
+change_id: CHG-SYSLOG-VICTORS-SWITCH-20260802T020921Z
+status: PROPOSED
+requested_by: network-agent
+created_at: '2026-08-02T02:09:21.688415+00:00'
+target:
+  hostname: Victors-Switch
+  test_inventory_group: remediation_targets
+  production_inventory_group: production_canary_switches
+finding:
+  control: SYSLOG
+  current_status: FAIL
+  compliance_score: 83
+  evidence_report: reports/Victors-Switch_20260802T020913154305522_compliance.json
+remediation:
+  remediation_id: REM-SYSLOG-001
+  justification: Proposal generated from current compliance evidence
+implementation:
+  playbook: playbooks/remediation/remediate_syslog.yml
+  validation_playbook: playbooks/validation/validate_syslog.yml
+  rollback_playbook: playbooks/rollback/rollback_syslog.yml
+promotion:
+  test_required: true
+  production_approval_required: true
+  production_status: NOT_AUTHORIZED
