@@ -1,6 +1,6 @@
 ---
 - name: Cisco IOS Health Assessment
-  hosts: cisco
+  hosts: all
   gather_facts: false
 
   tasks:
