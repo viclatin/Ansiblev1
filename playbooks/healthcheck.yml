@@ -1,4 +1,4 @@
-----
+---
 - name: Cisco IOS Health Assessment
   hosts: cisco
   gather_facts: false
