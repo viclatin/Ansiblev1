@@ -9,14 +9,18 @@ on:
 jobs:
   ansible-quality:
     name: Ansible quality gates
-    runs-on:
-      - ubumtu-latest
-      - linux
-      - ci-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
       - name: Install Ansible tooling
         run: |
@@ -47,6 +51,7 @@ jobs:
           ansible-lint --strict playbooks
 
       - name: Ansible syntax checks
+        shell: bash
         run: |
           . .venv-ci-ansible/bin/activate
           while IFS= read -r playbook; do
@@ -56,14 +61,18 @@ jobs:
 
   python-quality:
     name: Python quality gates
-    runs-on:
-      - ubumtu-latest
-      - linux
-      - ci-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
       - name: Install Python lint tooling
         run: |
@@ -73,6 +82,7 @@ jobs:
           python -m pip install "ruff>=0.6.0" "pytest>=8.0.0" "PyYAML>=6.0.0"
 
       - name: Python syntax checks
+        shell: bash
         run: |
           . .venv-ci-python/bin/activate
           while IFS= read -r py_file; do
