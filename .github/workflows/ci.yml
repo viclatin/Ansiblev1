@@ -10,7 +10,7 @@ jobs:
   ansible-quality:
     name: Ansible quality gates
     runs-on:
-      - self-hosted
+      - ubuntu-latest
       - linux
       - ci-validation
 
@@ -57,7 +57,7 @@ jobs:
   python-quality:
     name: Python quality gates
     runs-on:
-      - self-hosted
+      - ubuntu-latest
       - linux
       - ci-validation
 
