@@ -6,7 +6,6 @@
   tasks:
     - name: Gather IOS facts
       cisco.ios.ios_facts:
-
    
     - name: Gather health information
       cisco.ios.ios_command:
