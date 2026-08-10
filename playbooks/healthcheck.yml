@@ -417,7 +417,6 @@
             not_supported{%- else -%}
             ok{%- endif -%}
           details: "Inventory and hardware presence"
-``
 
     - name: Active ICMP probe to 8.8.8.8
       cisco.ios.ios_command:
