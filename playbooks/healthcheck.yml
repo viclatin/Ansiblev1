@@ -7,11 +7,6 @@
     - name: Gather IOS facts
       cisco.ios.ios_facts:
 
-    - name: Get hostname
-      cisco.ios.ios_command:
-        commands:
-          - show running-config | include ^hostname
-      register: hostname_info
 
     - name: Gather health information
       cisco.ios.ios_command:
@@ -399,7 +394,7 @@
     - name: Build health report
       set_fact:
         health_report:
-          hostname: "{{ ansible_net_hostname | default(hostname_info.stdout[0] | regex_replace('hostname ', '')) }}"
+          hostname: "{{ ansible_net_hostname }}"
           timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
           cpu_output: "{{ cpu_metrics }}"
           memory_output: "{{ memory_metrics }}"
