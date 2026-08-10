@@ -249,12 +249,10 @@
           status: >-
             {%- set output = interfaces_full.stdout[0] | default('') -%}
             {%- if output | trim == '' -%}
-            not_supported
-            {%- elif interface_error_values | default([]) | length > 0 -%}
-            warning
-            {%- else -%}
-            ok
-            {%- endif -%}
+            not_supported{%- elif
+            interface_error_values | default([]) | length > 0 -%}
+            warning{%- else -%}
+            ok{%- endif -%}
           details: >-
             {{
               'Nonzero interface error counters detected'
@@ -366,14 +364,10 @@
             {%- set output = ntp_full.stdout[0] | default('') -%}
             {%- set lower = output | lower -%}
             {%- if output | trim == '' -%}
-            not_supported
-            {%- elif 'unsynchronized' in lower -%}
-            warning
-            {%- elif 'synchronized' in lower -%}
-            ok
-            {%- else -%}
-            warning
-            {%- endif -%}
+            not_supported{%- elif 'unsynchronized' in lower -%}
+            warning{%- elif 'synchronized' in lower -%}
+            ok{%- else -%}
+            warning{%- endif -%}
           details: "NTP synchronization status"
 
     - name: Build OSPF neighbor check
@@ -420,11 +414,10 @@
           status: >-
             {%- set output = inventory_full.stdout[0] | default('') -%}
             {%- if output | trim == '' -%}
-            not_supported
-            {%- else -%}
-            ok
-            {%- endif -%}
+            not_supported{%- else -%}
+            ok{%- endif -%}
           details: "Inventory and hardware presence"
+``
 
     - name: Active ICMP probe to 8.8.8.8
       cisco.ios.ios_command:
