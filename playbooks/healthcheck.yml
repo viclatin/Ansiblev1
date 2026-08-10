@@ -385,6 +385,13 @@
       register: tr_8_4
       failed_when: false
 
+    - name: Show available GitHub-related env vars
+      shell: env | grep -i github
+      register: github_env
+      changed_when: false
+    - debug:
+        var: github_env.stdout_lines
+        
     - name: Build health report
       set_fact:
         health_report:
