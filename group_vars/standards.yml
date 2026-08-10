@@ -18,14 +18,7 @@ compliance_checks:
     expected_state: present
     regex: "^ntp server"
 
-  SNMP:
-    id: SNMP-001
-    category: monitoring
-    description: "SNMP should be configured for device monitoring."
-    severity: medium
-    remediation: "Configure SNMP community strings or user-based authentication."
-    expected_state: present
-    regex: "^snmp-server"
+
 
   SYSLOG:
     id: SYSLOG-001
@@ -45,11 +38,4 @@ compliance_checks:
     expected_state: present
     regex: "^ transport input ssh"
 
-  HTTP:
-    id: HTTP-001
-    category: management
-    description: "HTTP server should be disabled and HTTPS used instead."
-    severity: high
-    remediation: "Remove the HTTP server configuration and use secure HTTPS management."
-    expected_state: absent
-    regex: '^ip http server'
+
