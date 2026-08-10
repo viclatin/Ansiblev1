@@ -388,5 +388,5 @@
       changed_when: false
 
     - name: Display health report
-      debug:
-       var: health_report
+      ansible.builtin.debug:
+        var: health_report
