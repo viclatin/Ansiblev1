@@ -378,14 +378,14 @@
       register: tr_8_4
       failed_when: false
 
-    - name: Show available GitHub-related env vars
+    - name: Display GitHub environment variables
       delegate_to: localhost
       shell: env | grep -i github
       register: github_env
       changed_when: false
       failed_when: false
 
-    - name: Display GitHub environment variables
+    - name: Show GitHub environment variables
       debug:
         var: github_env.stdout_lines
 
