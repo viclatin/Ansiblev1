@@ -390,3 +390,4 @@
     - name: Display health report
       ansible.builtin.debug:
         var: health_report
+        
