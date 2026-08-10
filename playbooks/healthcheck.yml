@@ -378,16 +378,110 @@
       register: tr_8_4
       failed_when: false
 
-    - name: Display GitHub environment variables
-      delegate_to: localhost
-      shell: env | grep -i github
-      register: github_env
-      changed_when: false
-      failed_when: false
+    - name: Set report publishing variables
+      ansible.builtin.set_fact:
+        report_filename: "{{ ansible_net_hostname }}_health.json"
+        report_local_path: "/tmp/{{ ansible_net_hostname }}_health.json"
+        github_api_url: >-
+          https://api.github.com/repos/viclatin/Ansiblev1/contents/reports/{{
+          ansible_net_hostname }}_health.json
 
-    - name: Show GitHub environment variables
-      debug:
-        var: github_env.stdout_lines
+    - name: Verify GitHub API token is available
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'GITHUB_TOKEN') | length > 0
+        fail_msg: >-
+          GITHUB_TOKEN was not injected by the AWX Report API credential.
+          Confirm that the credential is attached to the Health Assessment
+          Job Template.
+        success_msg: "GitHub API token is available."
+      delegate_to: localhost
+      no_log: true
+
+    - name: Write health report locally
+      ansible.builtin.copy:
+        content: "{{ health_report | to_nice_json }}"
+        dest: "{{ report_local_path }}"
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Read generated health report
+      ansible.builtin.slurp:
+        src: "{{ report_local_path }}"
+      register: report_json
+      delegate_to: localhost
+
+    - name: Check whether report already exists in GitHub
+      ansible.builtin.uri:
+        url: "{{ github_api_url }}"
+        method: GET
+        headers:
+          Authorization: >-
+            Bearer {{ lookup('ansible.builtin.env', 'GITHUB_TOKEN') }}
+          Accept: "application/vnd.github+json"
+          X-GitHub-Api-Version: "2022-11-28"
+        return_content: true
+        status_code:
+          - 200
+          - 404
+      register: github_existing_report
+      delegate_to: localhost
+      no_log: true
+
+    - name: Create or update health report in GitHub
+      ansible.builtin.uri:
+        url: "{{ github_api_url }}"
+        method: PUT
+        headers:
+          Authorization: >-
+            Bearer {{ lookup('ansible.builtin.env', 'GITHUB_TOKEN') }}
+          Accept: "application/vnd.github+json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body_format: json
+        body:
+          message: >-
+            chore: update health report for {{ ansible_net_hostname }} [skip ci]
+          content: "{{ report_json.content }}"
+          branch: main
+          sha: >-
+            {{
+              github_existing_report.json.sha
+              if github_existing_report.status == 200
+              else omit
+            }}
+        return_content: true
+        status_code:
+          - 200
+          - 201
+      register: github_report_upload
+      delegate_to: localhost
+      no_log: true
+
+    - name: Confirm GitHub report publication
+      ansible.builtin.debug:
+        msg:
+          - "Report successfully published to GitHub."
+          - "Repository: viclatin/Ansiblev1"
+          - "Path: reports/{{ report_filename }}"
+          - "Branch: main"
+          - >-
+            Action: {{
+              'updated'
+              if github_report_upload.status == 200
+              else 'created'
+            }}
+          - "Commit SHA: {{ github_report_upload.json.commit.sha }}"
+
+    - name: Remove temporary local report
+      ansible.builtin.file:
+        path: "{{ report_local_path }}"
+        state: absent
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Display health report
+      ansible.builtin.debug:
+        var: health_report
 
     - name: Build health report
       set_fact:
