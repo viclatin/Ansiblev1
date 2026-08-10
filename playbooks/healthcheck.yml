@@ -258,125 +258,33 @@
           - ping 8.8.8.8 repeat 5
       register: ping_8
       failed_when: false
-
-    - name: Parse ping 8.8.8.8 results
-      set_fact:
-        ping_8_metrics:
-          raw_output: '{{ ping_8.stdout[0] | default("") }}'
-          success_percent: >-
-            {% set output = ping_8.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {{ (matches | first | default('0')) | int }}
-          packet_loss_percent: >-
-            {% set output = ping_8.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {% set success_percent = (matches | first | default('0')) | int %}
-            {{ 100 - success_percent }}
-          rtt_avg_ms: >-
-            {% set output = ping_8.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {{ (matches | first | default('0')) | float }}
-          latency_band: >-
-            {% set output = ping_8.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {% set avg = (matches | first | default('0')) | float %}
-            {% if avg <= 30 %}
-            low
-            {% elif avg >= 60 and avg <= 100 %}
-            medium
-            {% elif avg >= 120 %}
-            high
-            {% else %}
-            unclassified
-            {% endif %}
-          status: >-
-            {% set output = ping_8.stdout[0] | default('') %}
-            {% set smatches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {% set success_percent = (smatches | first | default('0')) | int %}
-            {% set rmatches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {% set avg = (rmatches | first | default('0')) | float %}
-            {% set loss = 100 - success_percent %}
-            {% if loss >= 20 %}
-            critical
-            {% elif loss >= 5 %}
-            warning
-            {% elif avg >= 300 %}
-            critical
-            {% elif avg >= 100 %}
-            warning
-            {% else %}
-            ok
-            {% endif %}
-
-    - name: Traceroute to 8.8.8.8
-      cisco.ios.ios_command:
-        commands:
-          - traceroute 8.8.8.8
-      register: tr_8
-      failed_when: false
-
-    - name: Active ICMP probe to 8.8.4.4
-      cisco.ios.ios_command:
-        commands:
-          - ping 8.8.4.4 repeat 5
-      register: ping_8_4
-      failed_when: false
-
-    - name: Parse ping 8.8.4.4 results
-      set_fact:
-        ping_8_4_metrics:
-          raw_output: '{{ ping_8_4.stdout[0] | default("") }}'
-          success_percent: >-
-            {% set output = ping_8_4.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {{ (matches | first | default('0')) | int }}
-          packet_loss_percent: >-
-            {% set output = ping_8_4.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {% set success_percent = (matches | first | default('0')) | int %}
-            {{ 100 - success_percent }}
-          rtt_avg_ms: >-
-            {% set output = ping_8_4.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {{ (matches | first | default('0')) | float }}
-          latency_band: >-
-            {% set output = ping_8_4.stdout[0] | default('') %}
-            {% set matches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {% set avg = (matches | first | default('0')) | float %}
-            {% if avg <= 30 %}
-            low
-            {% elif avg >= 60 and avg <= 100 %}
-            medium
-            {% elif avg >= 120 %}
-            high
-            {% else %}
-            unclassified
-            {% endif %}
-          status: >-
-            {% set output = ping_8_4.stdout[0] | default('') %}
-            {% set smatches = output | regex_findall('Success rate is\\s*([0-9]+)\\s*percent') %}
-            {% set success_percent = (smatches | first | default('0')) | int %}
-            {% set rmatches = output | regex_findall('round-trip min/avg/max = [0-9.]+/([0-9.]+)/[0-9.]+ ms') %}
-            {% set avg = (rmatches | first | default('0')) | float %}
-            {% set loss = 100 - success_percent %}
-            {% if loss >= 20 %}
-            critical
-            {% elif loss >= 5 %}
-            warning
-            {% elif avg >= 300 %}
-            critical
-            {% elif avg >= 100 %}
-            warning
-            {% else %}
-            ok
-            {% endif %}
-
-    - name: Traceroute to 8.8.4.4
-      cisco.ios.ios_command:
-        commands:
-          - traceroute 8.8.4.4
-      register: tr_8_4
-      failed_when: false
+    - name: Build health report
+      ansible.builtin.set_fact:
+        health_report:
+          hostname: "{{ ansible_net_hostname }}"
+          timestamp: "{{ lookup('ansible.builtin.pipe', 'date -Iseconds') }}"
+          cpu_output: "{{ cpu_metrics }}"
+          memory_output: "{{ memory_metrics }}"
+          cpu_raw_output: "{{ health_data.stdout[2] | default('') }}"
+          memory_raw_output: "{{ health_data.stdout[3] | default('') }}"
+          ios_version: "{{ health_data.stdout[0] | default('') }}"
+          interfaces_output: "{{ health_data.stdout[1] | default('') }}"
+          checks:
+            interface_errors: "{{ interface_check }}"
+            environmental_status: "{{ environmental_check }}"
+            power_and_fans: "{{ power_check }}"
+            stack_state: "{{ stack_check }}"
+            spanning_tree: "{{ stp_check }}"
+            logging_events: "{{ logging_check }}"
+            ntp: "{{ ntp_check }}"
+            ospf_neighbors: "{{ ospf_check }}"
+            bgp_neighbors: "{{ bgp_check }}"
+            inventory: "{{ inventory_check }}"
+            probes:
+              ping_8_8_8_8: "{{ ping_8_metrics | default({}) }}"
+              traceroute_8_8_8_8: "{{ tr_8.stdout[0] | default('') }}"
+              ping_8_8_4_4: "{{ ping_8_4_metrics | default({}) }}"
+              traceroute_8_8_4_4: "{{ tr_8_4.stdout[0] | default('') }}"
 
     - name: Set report publishing variables
       ansible.builtin.set_fact:
@@ -481,42 +389,4 @@
 
     - name: Display health report
       ansible.builtin.debug:
-        var: health_report
-
-    - name: Build health report
-      set_fact:
-        health_report:
-          hostname: "{{ ansible_net_hostname }}"
-          timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"
-          cpu_output: "{{ cpu_metrics }}"
-          memory_output: "{{ memory_metrics }}"
-          cpu_raw_output: "{{ health_data.stdout[2] | default('') }}"
-          memory_raw_output: "{{ health_data.stdout[3] | default('') }}"
-          ios_version: "{{ health_data.stdout[0] }}"
-          interfaces_output: "{{ health_data.stdout[1] }}"
-          checks:
-            interface_errors: "{{ interface_check }}"
-            environmental_status: "{{ environmental_check }}"
-            power_and_fans: "{{ power_check }}"
-            stack_state: "{{ stack_check }}"
-            spanning_tree: "{{ stp_check }}"
-            logging_events: "{{ logging_check }}"
-            ntp: "{{ ntp_check }}"
-            ospf_neighbors: "{{ ospf_check }}"
-            bgp_neighbors: "{{ bgp_check }}"
-            inventory: "{{ inventory_check }}"
-            probes:
-              ping_8_8_8_8: "{{ ping_8_metrics | default({}) }}"
-              traceroute_8_8_8_8: "{{ tr_8.stdout[0] | default('') }}"
-              ping_8_8_4_4: "{{ ping_8_4_metrics | default({}) }}"
-              traceroute_8_8_4_4: "{{ tr_8_4.stdout[0] | default('') }}"
-
-    - name: Write health report
-      delegate_to: localhost
-      copy:
-        content: "{{ health_report | to_nice_json }}"
-        dest: "../reports/{{ ansible_net_hostname | default(inventory_hostname) }}_health.json"
-
-    - name: Display health report
-      debug:
         var: health_report
