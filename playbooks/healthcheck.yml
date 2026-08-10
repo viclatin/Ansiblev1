@@ -6,6 +6,7 @@
   tasks:
     - name: Gather IOS facts
       cisco.ios.ios_facts:
+
     - name: Gather health information
       cisco.ios.ios_command:
         commands:
@@ -29,7 +30,7 @@
       register: env_full
       failed_when: false
 
-    - name: Collect switch/stack output
+    - name: Collect switch or stack output
       cisco.ios.ios_command:
         commands:
           - show switch
@@ -79,178 +80,351 @@
       failed_when: false
 
     - name: Extract memory line
-      set_fact:
-        memory_line: "{{ (health_data.stdout[3] | default('') | split('\n') | select('match', '^Processor') | list | first) | default('') }}"
+      ansible.builtin.set_fact:
+        memory_line: >-
+          {{
+            (
+              health_data.stdout[3]
+              | default('')
+              | split('\n')
+              | select('match', '^Processor')
+              | list
+              | first
+            )
+            | default('')
+          }}
 
     - name: Parse CPU and memory metrics
-      set_fact:
+      ansible.builtin.set_fact:
         cpu_metrics:
           raw_output: "{{ health_data.stdout[2] | default('') }}"
-          five_seconds_used_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
-          five_seconds_idle_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$', '\\2')) | default('0') | float | round(2)) }}"
-          one_minute_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*one minute: ([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
-          five_minutes_percent: "{{ ((health_data.stdout[2] | default('') | regex_replace('^.*five minutes: ([0-9.]+)%;.*$', '\\1')) | default('0') | float | round(2)) }}"
+          five_seconds_used_percent: >-
+            {{
+              (
+                health_data.stdout[2]
+                | default('')
+                | regex_replace(
+                    '^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$',
+                    '\\1'
+                  )
+              )
+              | default('0')
+              | float
+              | round(2)
+            }}
+          five_seconds_interrupt_percent: >-
+            {{
+              (
+                health_data.stdout[2]
+                | default('')
+                | regex_replace(
+                    '^.*five seconds: ([0-9.]+)%/([0-9.]+)%;.*$',
+                    '\\2'
+                  )
+              )
+              | default('0')
+              | float
+              | round(2)
+            }}
+          one_minute_percent: >-
+            {{
+              (
+                health_data.stdout[2]
+                | default('')
+                | regex_replace(
+                    '^.*one minute: ([0-9.]+)%;.*$',
+                    '\\1'
+                  )
+              )
+              | default('0')
+              | float
+              | round(2)
+            }}
+          five_minutes_percent: >-
+            {{
+              (
+                health_data.stdout[2]
+                | default('')
+                | regex_replace(
+                    '^.*five minutes: ([0-9.]+)%;.*$',
+                    '\\1'
+                  )
+              )
+              | default('0')
+              | float
+              | round(2)
+            }}
         memory_metrics:
           raw_output: "{{ health_data.stdout[3] | default('') }}"
-          total_bytes: "{{ ((memory_line | default('') | split() | default([]))[2] | default('0') | int) }}"
-          used_bytes: "{{ ((memory_line | default('') | split() | default([]))[3] | default('0') | int) }}"
-          free_bytes: "{{ ((memory_line | default('') | split() | default([]))[4] | default('0') | int) }}"
-          used_percent: "{{ (((memory_line | default('') | split() | default([]))[3] | default('0') | int) * 100 / (((memory_line | default('') | split() | default([]))[2] | default('1') | int))) | round(2) }}"
+          total_bytes: >-
+            {{
+              (
+                (
+                  memory_line
+                  | default('')
+                  | split()
+                  | default([])
+                )[2]
+                | default('0')
+                | int
+              )
+            }}
+          used_bytes: >-
+            {{
+              (
+                (
+                  memory_line
+                  | default('')
+                  | split()
+                  | default([])
+                )[3]
+                | default('0')
+                | int
+              )
+            }}
+          free_bytes: >-
+            {{
+              (
+                (
+                  memory_line
+                  | default('')
+                  | split()
+                  | default([])
+                )[4]
+                | default('0')
+                | int
+              )
+            }}
+          used_percent: >-
+            {{
+              (
+                (
+                  (
+                    memory_line
+                    | default('')
+                    | split()
+                    | default([])
+                  )[3]
+                  | default('0')
+                  | int
+                ) * 100
+                /
+                (
+                  (
+                    (
+                      memory_line
+                      | default('')
+                      | split()
+                      | default([])
+                    )[2]
+                    | default('1')
+                    | int
+                  ),
+                  1
+                )
+                | max
+              )
+              | round(2)
+            }}
+
+    - name: Extract nonzero interface error counters
+      ansible.builtin.set_fact:
+        interface_error_values: >-
+          {{
+            interfaces_full.stdout[0]
+            | default('')
+            | regex_findall(
+                '(?im)^\s*([1-9][0-9]*)\s+'
+                ~ '(?:input errors|output errors|CRC|frame|overrun|ignored'
+                ~ '|collisions|interface resets)'
+              )
+            | map('int')
+            | list
+          }}
 
     - name: Build interface errors check
-      set_fact:
+      ansible.builtin.set_fact:
         interface_check:
           raw_output: "{{ interfaces_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = interfaces_full.stdout[0] | default('') %}
-            {% if output | trim == '' %}
+            {%- set output = interfaces_full.stdout[0] | default('') -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif output | lower | regex_search('input errors|output errors|crc|error', multiline=True) %}
+            {%- elif interface_error_values | default([]) | length > 0 -%}
             warning
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
-          details: "Interface counters inspected"
+            {%- endif -%}
+          details: >-
+            {{
+              'Nonzero interface error counters detected'
+              if interface_error_values | default([]) | length > 0
+              else 'No nonzero interface error counters detected'
+            }}
 
-    - name: Build environmental check (temperature / sensors)
-      set_fact:
+    - name: Build environmental check
+      ansible.builtin.set_fact:
         environmental_check:
           raw_output: "{{ env_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = env_full.stdout[0] | default('') %}
-            {% set lower = output | lower %}
-            {% if output | trim == '' %}
+            {%- set output = env_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif lower | regex_search('alarm|critical|warning|fault|fail|not\s+ok|shutdown', multiline=True) %}
+            {%- elif lower | regex_search(
+              'alarm|critical|warning|fault|fail|not\s+ok|shutdown',
+              multiline=True
+            ) -%}
             warning
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
+            {%- endif -%}
           details: "Environment sensors inspected"
 
-    - name: Build power & fans check
-      set_fact:
+    - name: Build power and fans check
+      ansible.builtin.set_fact:
         power_check:
           raw_output: "{{ env_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = env_full.stdout[0] | default('') %}
-            {% set lower = output | lower %}
-            {% if output | trim == '' %}
+            {%- set output = env_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif lower | regex_search('(fan|power).*(fail|fault|off|down|not\s+present|not\s+ok)|offline|fault|fail', multiline=True) %}
+            {%- elif lower | regex_search(
+              '(fan|power).*(fail|fault|off|down|not\s+present|not\s+ok)'
+              ~ '|offline|fault|fail',
+              multiline=True
+            ) -%}
             critical
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
+            {%- endif -%}
           details: "Power and fan status"
 
     - name: Build stack state check
-      set_fact:
+      ansible.builtin.set_fact:
         stack_check:
           raw_output: "{{ switch_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = switch_full.stdout[0] | default('') %}
-            {% set lower = output | lower %}
-            {% if output | trim == '' %}
+            {%- set output = switch_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif lower | regex_search('inconsistent|mismatch|not\s+ready|removed|down|fail|fault', multiline=True) %}
+            {%- elif lower | regex_search(
+              'inconsistent|mismatch|not\s+ready|removed|down|fail|fault',
+              multiline=True
+            ) -%}
             warning
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
+            {%- endif -%}
           details: "Stack membership and role"
 
     - name: Build spanning-tree check
-      set_fact:
+      ansible.builtin.set_fact:
         stp_check:
           raw_output: "{{ stp_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = stp_full.stdout[0] | default('') %}
-            {% set lower = output | lower %}
-            {% if output | trim == '' %}
+            {%- set output = stp_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif lower | regex_search('loop|inconsistent|errdisable|bpduguard|root\s+inconsistent|error|failure', multiline=True) %}
+            {%- elif lower | regex_search(
+              'loop|inconsistent|errdisable|bpduguard'
+              ~ '|root\s+inconsistent|error|failure',
+              multiline=True
+            ) -%}
             warning
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
+            {%- endif -%}
           details: "Spanning-tree summary"
 
     - name: Build logging events check
-      set_fact:
+      ansible.builtin.set_fact:
         logging_check:
           raw_output: "{{ logging_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = logging_full.stdout[0] | default('') %}
-            {% if output | trim == '' %}
+            {%- set output = logging_full.stdout[0] | default('') -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif output | regex_search('ERROR|CRITICAL|SEVERE|ALERT', multiline=True) %}
+            {%- elif output | regex_search(
+              'ERROR|CRITICAL|SEVERE|ALERT',
+              multiline=True
+            ) -%}
             warning
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
+            {%- endif -%}
           details: "Recent log events"
 
     - name: Build NTP check
-      set_fact:
+      ansible.builtin.set_fact:
         ntp_check:
           raw_output: "{{ ntp_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = ntp_full.stdout[0] | default('') %}
-            {% set lower = output | lower %}
-            {% if output | trim == '' %}
+            {%- set output = ntp_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% elif 'unsynchronized' in lower %}
+            {%- elif 'unsynchronized' in lower -%}
             warning
-            {% elif 'synchronized' in lower %}
+            {%- elif 'synchronized' in lower -%}
             ok
-            {% else %}
+            {%- else -%}
             warning
-            {% endif %}
+            {%- endif -%}
           details: "NTP synchronization status"
 
     - name: Build OSPF neighbor check
-      set_fact:
+      ansible.builtin.set_fact:
         ospf_check:
           raw_output: "{{ ospf_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = ospf_full.stdout[0] | default('') %}
-            {% if output | trim == '' %}
+            {%- set output = ospf_full.stdout[0] | default('') -%}
+            {%- if output | trim == '' -%}
             not_applicable
-            {% elif output | regex_search('Full|Full/\\w+|Full\\(\\w+\\)', multiline=True) %}
+            {%- elif output | regex_search(
+              'Full|Full/\w+|Full\(\w+\)',
+              multiline=True
+            ) -%}
             ok
-            {% else %}
+            {%- else -%}
             warning
-            {% endif %}
+            {%- endif -%}
           details: "OSPF neighbor state"
 
     - name: Build BGP neighbor check
-      set_fact:
+      ansible.builtin.set_fact:
         bgp_check:
           raw_output: "{{ bgp_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = bgp_full.stdout[0] | default('') %}
-            {% if output | trim == '' %}
+            {%- set output = bgp_full.stdout[0] | default('') -%}
+            {%- set lower = output | lower -%}
+            {%- if output | trim == '' or 'bgp not active' in lower -%}
             not_applicable
-            {% elif output | regex_search('State\\s+|Established|Up', multiline=True) %}
+            {%- elif output | regex_search(
+              'Established|\s+[0-9]+\s*$',
+              multiline=True
+            ) -%}
             ok
-            {% else %}
+            {%- else -%}
             warning
-            {% endif %}
+            {%- endif -%}
           details: "BGP neighbor state"
 
-    - name: Build hardware/inventory check
-      set_fact:
+    - name: Build hardware inventory check
+      ansible.builtin.set_fact:
         inventory_check:
           raw_output: "{{ inventory_full.stdout[0] | default('') }}"
           status: >-
-            {% set output = inventory_full.stdout[0] | default('') %}
-            {% if output | trim == '' %}
+            {%- set output = inventory_full.stdout[0] | default('') -%}
+            {%- if output | trim == '' -%}
             not_supported
-            {% else %}
+            {%- else -%}
             ok
-            {% endif %}
-          details: "Inventory / hardware presence"
+            {%- endif -%}
+          details: "Inventory and hardware presence"
 
     - name: Active ICMP probe to 8.8.8.8
       cisco.ios.ios_command:
@@ -258,11 +432,164 @@
           - ping 8.8.8.8 repeat 5
       register: ping_8
       failed_when: false
+
+    - name: Parse ping 8.8.8.8 results
+      ansible.builtin.set_fact:
+        ping_8_metrics:
+          raw_output: "{{ ping_8.stdout[0] | default('') }}"
+          success_percent: >-
+            {%- set output = ping_8.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {{ matches | first | default('0') | int }}
+          packet_loss_percent: >-
+            {%- set output = ping_8.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {%- set success = matches | first | default('0') | int -%}
+            {{ 100 - success }}
+          rtt_avg_ms: >-
+            {%- set output = ping_8.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {{ matches | first | default('0') | float }}
+          latency_band: >-
+            {%- set output = ping_8.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {%- set avg = matches | first | default('0') | float -%}
+            {%- if avg == 0 -%}
+            unavailable
+            {%- elif avg <= 30 -%}
+            low
+            {%- elif avg <= 100 -%}
+            medium
+            {%- else -%}
+            high
+            {%- endif -%}
+          status: >-
+            {%- set output = ping_8.stdout[0] | default('') -%}
+            {%- set success_matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {%- set success = success_matches |
+              first | default('0') | int -%}
+            {%- set rtt_matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {%- set avg = rtt_matches | first | default('0') | float -%}
+            {%- set loss = 100 - success -%}
+            {%- if loss >= 20 -%}
+            critical
+            {%- elif loss >= 5 -%}
+            warning
+            {%- elif avg >= 300 -%}
+            critical
+            {%- elif avg >= 100 -%}
+            warning
+            {%- else -%}
+            ok
+            {%- endif -%}
+
+    - name: Traceroute to 8.8.8.8
+      cisco.ios.ios_command:
+        commands:
+          - traceroute 8.8.8.8
+      register: tr_8
+      failed_when: false
+
+    - name: Active ICMP probe to 8.8.4.4
+      cisco.ios.ios_command:
+        commands:
+          - ping 8.8.4.4 repeat 5
+      register: ping_8_4
+      failed_when: false
+
+    - name: Parse ping 8.8.4.4 results
+      ansible.builtin.set_fact:
+        ping_8_4_metrics:
+          raw_output: "{{ ping_8_4.stdout[0] | default('') }}"
+          success_percent: >-
+            {%- set output = ping_8_4.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {{ matches | first | default('0') | int }}
+          packet_loss_percent: >-
+            {%- set output = ping_8_4.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {%- set success = matches | first | default('0') | int -%}
+            {{ 100 - success }}
+          rtt_avg_ms: >-
+            {%- set output = ping_8_4.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {{ matches | first | default('0') | float }}
+          latency_band: >-
+            {%- set output = ping_8_4.stdout[0] | default('') -%}
+            {%- set matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {%- set avg = matches | first | default('0') | float -%}
+            {%- if avg == 0 -%}
+            unavailable
+            {%- elif avg <= 30 -%}
+            low
+            {%- elif avg <= 100 -%}
+            medium
+            {%- else -%}
+            high
+            {%- endif -%}
+          status: >-
+            {%- set output = ping_8_4.stdout[0] | default('') -%}
+            {%- set success_matches = output | regex_findall(
+              'Success rate is\s*([0-9]+)\s*percent'
+            ) -%}
+            {%- set success = success_matches |
+              first | default('0') | int -%}
+            {%- set rtt_matches = output | regex_findall(
+              'round-trip min/avg/max = '
+              ~ '[0-9.]+/([0-9.]+)/[0-9.]+ ms'
+            ) -%}
+            {%- set avg = rtt_matches | first | default('0') | float -%}
+            {%- set loss = 100 - success -%}
+            {%- if loss >= 20 -%}
+            critical
+            {%- elif loss >= 5 -%}
+            warning
+            {%- elif avg >= 300 -%}
+            critical
+            {%- elif avg >= 100 -%}
+            warning
+            {%- else -%}
+            ok
+            {%- endif -%}
+
+    - name: Traceroute to 8.8.4.4
+      cisco.ios.ios_command:
+        commands:
+          - traceroute 8.8.4.4
+      register: tr_8_4
+      failed_when: false
+
     - name: Build health report
       ansible.builtin.set_fact:
         health_report:
           hostname: "{{ ansible_net_hostname }}"
-          timestamp: "{{ lookup('ansible.builtin.pipe', 'date -Iseconds') }}"
+          timestamp: >-
+            {{ lookup('ansible.builtin.pipe', 'date -Iseconds') }}
           cpu_output: "{{ cpu_metrics }}"
           memory_output: "{{ memory_metrics }}"
           cpu_raw_output: "{{ health_data.stdout[2] | default('') }}"
@@ -281,15 +608,18 @@
             bgp_neighbors: "{{ bgp_check }}"
             inventory: "{{ inventory_check }}"
             probes:
-              ping_8_8_8_8: "{{ ping_8_metrics | default({}) }}"
-              traceroute_8_8_8_8: "{{ tr_8.stdout[0] | default('') }}"
-              ping_8_8_4_4: "{{ ping_8_4_metrics | default({}) }}"
-              traceroute_8_8_4_4: "{{ tr_8_4.stdout[0] | default('') }}"
+              ping_8_8_8_8: "{{ ping_8_metrics }}"
+              traceroute_8_8_8_8: >-
+                {{ tr_8.stdout[0] | default('') }}
+              ping_8_8_4_4: "{{ ping_8_4_metrics }}"
+              traceroute_8_8_4_4: >-
+                {{ tr_8_4.stdout[0] | default('') }}
 
     - name: Set report publishing variables
       ansible.builtin.set_fact:
         report_filename: "{{ ansible_net_hostname }}_health.json"
-        report_local_path: "/tmp/{{ ansible_net_hostname }}_health.json"
+        report_local_path: >-
+          /tmp/{{ ansible_net_hostname }}_health.json
         github_api_url: >-
           https://api.github.com/repos/viclatin/Ansiblev1/contents/reports/{{
           ansible_net_hostname }}_health.json
@@ -336,6 +666,30 @@
       delegate_to: localhost
       no_log: true
 
+    - name: Build base GitHub request body
+      ansible.builtin.set_fact:
+        github_request_body:
+          message: >-
+            chore: update health report for {{
+            ansible_net_hostname }} [skip ci]
+          content: "{{ report_json.content }}"
+          branch: main
+      no_log: true
+
+    - name: Add existing file SHA to GitHub request body
+      ansible.builtin.set_fact:
+        github_request_body: >-
+          {{
+            github_request_body
+            | combine(
+                {
+                  'sha': github_existing_report.json.sha
+                }
+              )
+          }}
+      when: github_existing_report.status == 200
+      no_log: true
+
     - name: Create or update health report in GitHub
       ansible.builtin.uri:
         url: "{{ github_api_url }}"
@@ -346,24 +700,61 @@
           Accept: "application/vnd.github+json"
           X-GitHub-Api-Version: "2022-11-28"
         body_format: json
-        body:
-          message: >-
-            chore: update health report for {{ ansible_net_hostname }} [skip ci]
-          content: "{{ report_json.content }}"
-          branch: main
-          sha: >-
-            {{
-              github_existing_report.json.sha
-              if github_existing_report.status == 200
-              else omit
-            }}
+        body: "{{ github_request_body }}"
         return_content: true
         status_code:
           - 200
           - 201
+          - 400
+          - 401
+          - 403
+          - 404
+          - 409
+          - 422
       register: github_report_upload
       delegate_to: localhost
       no_log: true
+
+    - name: Capture sanitized GitHub response
+      ansible.builtin.set_fact:
+        github_upload_result:
+          status: "{{ github_report_upload.status | default('unknown') }}"
+          message: >-
+            {{
+              (
+                github_report_upload.json
+                | default({})
+              ).message
+              | default('No GitHub response message returned')
+            }}
+          documentation_url: >-
+            {{
+              (
+                github_report_upload.json
+                | default({})
+              ).documentation_url
+              | default('')
+            }}
+      no_log: true
+
+    - name: Display sanitized GitHub upload result
+      ansible.builtin.debug:
+        var: github_upload_result
+
+    - name: Validate GitHub report publication
+      ansible.builtin.assert:
+        that:
+          - github_report_upload.status in [200, 201]
+        fail_msg: >-
+          GitHub rejected the report upload. HTTP status:
+          {{ github_upload_result.status }}. Message:
+          {{ github_upload_result.message }}
+        success_msg: >-
+          GitHub report was successfully {{
+            'updated'
+            if github_report_upload.status == 200
+            else 'created'
+          }}.
 
     - name: Confirm GitHub report publication
       ansible.builtin.debug:
