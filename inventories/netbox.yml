@@ -1,8 +1,6 @@
 ---
-plugin: netbox.netbox
-api_endpoint: "{{ lookup('env', 'NETBOX_API') }}"
-token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+plugin: netbox.netbox.nb_inventory
 validate_certs: false
 group_by:
-  - site
-  - device_role
+  - sites
+  - device_roles
