@@ -1,0 +1,3 @@
+---
+# Applies only to the NetBox device "Victors-Switch"
+example_host_var: "set from host_vars/Victors-Switch.yml"

@@ -1,0 +1,3 @@
+---
+# Applies to every host in NetBox site "toronto" (group: sites_toronto)
+example_site_var: "set from group_vars/sites_toronto.yml"
