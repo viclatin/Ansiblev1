@@ -1,0 +1,8 @@
+---
+plugin: netbox.netbox
+api_endpoint: "{{ lookup('env', 'NETBOX_API') }}"
+token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+validate_certs: false
+group_by:
+  - site
+  - device_role

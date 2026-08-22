@@ -2,3 +2,5 @@
 collections:
   - name: cisco.ios
   - name: ansible.netcommon
+  - name: netbox.netbox
+    version: ">=3.12.0"
