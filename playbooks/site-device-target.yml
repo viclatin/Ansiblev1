@@ -1,0 +1,35 @@
+---
+- name: Resolve site/host target for compliance
+  hosts: localhost
+  gather_facts: false
+  vars:
+    valid_sites:
+      - toronto
+    valid_site_hosts:
+      toronto:
+        - Victors-Switch
+
+  tasks:
+    - name: Validate the selected site
+      ansible.builtin.assert:
+        that:
+          - site is defined
+          - site in valid_sites
+        fail_msg: "Invalid site '{{ site | default('') }}'. Valid sites: {{ valid_sites | join(', ') }}"
+
+    - name: Validate the optional host against the chosen site
+      ansible.builtin.assert:
+        that:
+          - target_host is not defined or target_host == '' or target_host in valid_site_hosts[site]
+        fail_msg: "Invalid host '{{ target_host | default('') }}' for site '{{ site }}'. Valid hosts: {{ valid_site_hosts[site] | join(', ') }}"
+
+    - name: Build the final target expression
+      ansible.builtin.set_fact:
+        selected_target: "{{ target_host if (target_host | default('')) | length > 0 else ('sites_' + site) }}"
+
+    - name: Show the resolved target
+      ansible.builtin.debug:
+        msg: "Launching compliance against {{ selected_target }}"
+
+- name: Run compliance logic against selected target
+  import_playbook: compliance.yml
