@@ -32,4 +32,4 @@
         msg: "Launching compliance against {{ selected_target }}"
 
 - name: Run compliance logic against selected target
-  import_playbook: playbooks/compliance.yml
+  import_playbook: compliance.yml
