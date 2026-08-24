@@ -1,0 +1,34 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "url": "http://localhost:30080/api/dcim/device-types/1/",
+            "display": "Catalyst 8000v",
+            "manufacturer": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/manufacturers/1/",
+                "display": "Cisco",
+                "name": "Cisco",
+                "slug": "cisco"
+            },
+            "model": "Catalyst 8000v",
+            "slug": "8000v",
+            "part_number": "",
+            "u_height": 1,
+            "is_full_depth": true,
+            "subdevice_role": null,
+            "airflow": null,
+            "front_image": null,
+            "rear_image": null,
+            "comments": "",
+            "tags": [],
+            "custom_fields": {},
+            "created": "2026-08-18T00:47:50.538693Z",
+            "last_updated": "2026-08-18T01:23:54.357093Z",
+            "device_count": 1
+        }
+    ]
+}

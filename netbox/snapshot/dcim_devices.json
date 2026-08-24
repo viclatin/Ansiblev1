@@ -1,0 +1,87 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 2,
+            "url": "http://localhost:30080/api/dcim/devices/2/",
+            "display": "Victors-Switch",
+            "name": "Victors-Switch",
+            "device_type": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/device-types/1/",
+                "display": "Catalyst 8000v",
+                "manufacturer": {
+                    "id": 1,
+                    "url": "http://localhost:30080/api/dcim/manufacturers/1/",
+                    "display": "Cisco",
+                    "name": "Cisco",
+                    "slug": "cisco"
+                },
+                "model": "Catalyst 8000v",
+                "slug": "8000v"
+            },
+            "device_role": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/device-roles/1/",
+                "display": "Access",
+                "name": "Access",
+                "slug": "access"
+            },
+            "tenant": null,
+            "platform": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/platforms/1/",
+                "display": "Cisco IOS",
+                "name": "Cisco IOS",
+                "slug": "ios"
+            },
+            "serial": "",
+            "asset_tag": null,
+            "site": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/sites/1/",
+                "display": "Toronto",
+                "name": "Toronto",
+                "slug": "toronto"
+            },
+            "location": null,
+            "rack": null,
+            "position": null,
+            "face": null,
+            "parent_device": null,
+            "status": {
+                "value": "active",
+                "label": "Active"
+            },
+            "airflow": null,
+            "primary_ip": {
+                "id": 1,
+                "url": "http://localhost:30080/api/ipam/ip-addresses/1/",
+                "display": "192.168.1.90/24",
+                "family": 4,
+                "address": "192.168.1.90/24"
+            },
+            "primary_ip4": {
+                "id": 1,
+                "url": "http://localhost:30080/api/ipam/ip-addresses/1/",
+                "display": "192.168.1.90/24",
+                "family": 4,
+                "address": "192.168.1.90/24"
+            },
+            "primary_ip6": null,
+            "cluster": null,
+            "virtual_chassis": null,
+            "vc_position": null,
+            "vc_priority": null,
+            "comments": "",
+            "local_context_data": null,
+            "tags": [],
+            "custom_fields": {},
+            "config_context": {},
+            "created": "2026-08-18T01:37:01.209729Z",
+            "last_updated": "2026-08-22T14:02:53.331566Z"
+        }
+    ]
+}

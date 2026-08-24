@@ -1,0 +1,137 @@
+---
+# Creates the NetBox schema that playbooks/compliance.yml writes into: a choice
+# set whose values carry colours, and the four device custom fields.
+#
+# Idempotent — an object that already exists is left alone. Safe to re-run, and
+# the way to rebuild the schema after a NetBox rebuild.
+#
+# Auth: NETBOX_API and NETBOX_TOKEN, as injected by the AWX "NetBox API"
+# credential. Requires a v1 token; see netbox/README.md for why.
+- name: Create the compliance custom fields in NetBox
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    netbox_api: "{{ lookup('ansible.builtin.env', 'NETBOX_API') | regex_replace('/$', '') }}"
+    netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+
+    # Colours are NetBox's named palette, not hex: blue, indigo, purple, pink,
+    # red, orange, yellow, green, teal, cyan, gray, black, white.
+    compliance_choices:
+      - ["compliant", "Compliant"]
+      - ["partial", "Partial"]
+      - ["non-compliant", "Non-Compliant"]
+      - ["unknown", "Unknown"]
+    compliance_colors:
+      compliant: green
+      partial: yellow
+      non-compliant: red
+      unknown: gray
+
+    compliance_fields:
+      - name: compliance_status
+        label: Compliance Status
+        type: select
+        description: Result of the most recent compliance assessment
+        default: unknown
+      - name: compliance_score
+        label: Compliance Score
+        type: integer
+        description: Percentage of controls passing, 0-100
+      - name: compliance_checked
+        label: Compliance Checked
+        type: date
+        description: Date of the most recent compliance assessment
+      - name: compliance_notes
+        label: Compliance Notes
+        type: longtext
+        description: Controls that failed the most recent assessment
+
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "Token {{ netbox_token }}"
+        Content-Type: application/json
+      validate_certs: false
+
+  tasks:
+    - name: Verify the NetBox credential was injected
+      ansible.builtin.assert:
+        that:
+          - netbox_api | length > 0
+          - netbox_token | length > 0
+        fail_msg: >-
+          NETBOX_API/NETBOX_TOKEN are unset. Attach the NetBox API credential
+          to this job template.
+        quiet: true
+
+    - name: Look for an existing choice set
+      ansible.builtin.uri:
+        url: "{{ netbox_api }}/api/extras/custom-field-choice-sets/?name=Compliance%20Status"
+        method: GET
+        status_code: [200]
+      register: nb_choiceset
+      check_mode: false
+
+    - name: Create the choice set
+      ansible.builtin.uri:
+        url: "{{ netbox_api }}/api/extras/custom-field-choice-sets/"
+        method: POST
+        body_format: json
+        body:
+          name: Compliance Status
+          description: Compliance assessment outcomes, worst to best
+          extra_choices: "{{ compliance_choices }}"
+          choice_colors: "{{ compliance_colors }}"
+          order_alphabetically: false
+        status_code: [201]
+      register: nb_choiceset_created
+      when: nb_choiceset.json.count == 0
+
+    - name: Resolve the choice set id
+      ansible.builtin.set_fact:
+        choiceset_id: >-
+          {{
+            nb_choiceset_created.json.id
+            if (nb_choiceset.json.count == 0)
+            else nb_choiceset.json.results[0].id
+          }}
+
+    - name: Look for existing custom fields
+      ansible.builtin.uri:
+        url: "{{ netbox_api }}/api/extras/custom-fields/?name={{ item.name }}"
+        method: GET
+        status_code: [200]
+      register: nb_fields
+      loop: "{{ compliance_fields }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+
+    - name: Create the custom fields
+      ansible.builtin.uri:
+        url: "{{ netbox_api }}/api/extras/custom-fields/"
+        method: POST
+        body_format: json
+        body: >-
+          {{
+            {
+              'object_types': ['dcim.device'],
+              'name': item.item.name,
+              'label': item.item.label,
+              'type': item.item.type,
+              'description': item.item.description,
+              'group_name': 'Compliance',
+            }
+            | combine(
+                {'related_object_type': none, 'choice_set': choiceset_id | int,
+                 'default': item.item.default}
+                if item.item.type == 'select' else {}
+              )
+          }}
+        status_code: [201]
+      when: item.json.count == 0
+      loop: "{{ nb_fields.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
