@@ -5,6 +5,6 @@ group_by:
   - sites
   - device_roles
   # Produces platforms_<slug> groups. Connection settings hang off these
-  # (see group_vars/platforms_cisco_ios.yml) because the platform, not the
+  # (see group_vars/platforms_ios.yml) because the platform, not the
   # site, determines the network driver.
   - platforms
