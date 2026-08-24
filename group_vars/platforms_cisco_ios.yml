@@ -1,0 +1,13 @@
+---
+# Connection settings for every device whose NetBox platform slug is
+# "cisco_ios", at any site. Keyed on platform rather than site so a new NetBox
+# site needs no new file here — the devices inherit these the moment the AWX
+# inventory source syncs.
+#
+# The filename must match the platform slug NetBox actually uses. Confirm with:
+#   ansible-inventory -i inventories/netbox.yml --graph
+# and rename this file if the generated group is not platforms_cisco_ios.
+# playbooks/site-device-target.yml asserts ansible_network_os is set, so a
+# mismatch fails loudly rather than silently skipping hosts.
+ansible_connection: network_cli
+ansible_network_os: cisco.ios.ios

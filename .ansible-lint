@@ -10,3 +10,9 @@ exclude_paths:
 
 skip_list:
   - fqcn[action-core]
+
+# compliance.yml derives its hosts: pattern from `site`, which is normally
+# supplied by the AWX survey. ansible-lint runs its own syntax-check and takes
+# no -e, so seed the variable here.
+extra_vars:
+  site: toronto

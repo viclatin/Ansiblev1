@@ -56,7 +56,10 @@ jobs:
           . .venv-ci-ansible/bin/activate
           while IFS= read -r playbook; do
             echo "Syntax checking ${playbook}"
-            ansible-playbook -i inventories/test/hosts.ini --syntax-check "${playbook}"
+            # site is required by compliance.yml's templated hosts: expression,
+            # which is evaluated during play parsing even under --syntax-check.
+            ansible-playbook -i inventories/test/hosts.ini \
+              --extra-vars "site=toronto" --syntax-check "${playbook}"
           done < <(find playbooks -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
 
   python-quality:

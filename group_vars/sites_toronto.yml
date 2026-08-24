@@ -1,3 +1,6 @@
 ---
 # Applies to every host in NetBox site "toronto" (group: sites_toronto)
+# Connection settings deliberately live in group_vars/platforms_cisco_ios.yml
+# instead: platform, not geography, determines the network driver, and keying
+# them there means a new NetBox site needs no new file.
 example_site_var: "set from group_vars/sites_toronto.yml"
