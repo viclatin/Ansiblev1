@@ -1,0 +1,146 @@
+---
+# Refreshes the compliance job template's survey dropdowns from the AWX
+# inventory, so an engineer sees which sites are available for automation
+# without having to type anything.
+#
+# Runs as an AWX job template on AWX's own schedule. It only READS the
+# inventory: syncing NetBox into AWX is the inventory source's job (Update on
+# Launch, or a sync schedule on the source), not this playbook's.
+#
+# Attach a "Red Hat Ansible Automation Platform" credential to the job
+# template; AWX injects CONTROLLER_HOST and CONTROLLER_OAUTH_TOKEN.
+# Supports --check: it reports the diff and posts nothing.
+- name: Sync AWX survey choices from the NetBox-backed inventory
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    awx_host: "{{ lookup('ansible.builtin.env', 'CONTROLLER_HOST') }}"
+    awx_token: "{{ lookup('ansible.builtin.env', 'CONTROLLER_OAUTH_TOKEN') }}"
+    awx_verify_ssl: "{{ lookup('ansible.builtin.env', 'CONTROLLER_VERIFY_SSL') | default('true', true) | bool }}"
+    # Inventory holding the NetBox-sourced sites_* groups, and the job template
+    # whose survey is refreshed. Override with -e / AWX extra vars.
+    survey_inventory_id: 4
+    survey_job_template_id: 9
+
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "Bearer {{ awx_token }}"
+        Content-Type: application/json
+      validate_certs: "{{ awx_verify_ssl }}"
+
+  tasks:
+    - name: Verify the AWX credential was injected
+      ansible.builtin.assert:
+        that:
+          - awx_host | length > 0
+          - awx_token | length > 0
+        fail_msg: >-
+          CONTROLLER_HOST/CONTROLLER_OAUTH_TOKEN are unset. Attach a
+          "Red Hat Ansible Automation Platform" credential to this job template.
+        quiet: true
+
+    - name: Read the inventory groups
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/inventories/{{ survey_inventory_id }}/groups/?page_size=200"
+        method: GET
+        return_content: true
+        status_code: [200]
+      register: awx_groups
+      check_mode: false
+
+    - name: Read the inventory hosts
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/inventories/{{ survey_inventory_id }}/hosts/?page_size=200"
+        method: GET
+        return_content: true
+        status_code: [200]
+      register: awx_hosts
+      check_mode: false
+
+    - name: Collect site and device names
+      ansible.builtin.set_fact:
+        survey_sites: >-
+          {{
+            awx_groups.json.results
+            | map(attribute='name')
+            | select('match', '^sites_')
+            | map('regex_replace', '^sites_', '')
+            | sort
+            | list
+          }}
+        survey_devices: "{{ awx_hosts.json.results | map(attribute='name') | sort | list }}"
+
+    - name: Fail if the inventory has no site groups
+      ansible.builtin.assert:
+        that:
+          - survey_sites | length > 0
+        fail_msg: >-
+          No sites_* groups in inventory {{ survey_inventory_id }}. The survey
+          was left untouched. Check that the NetBox inventory source has synced.
+
+    - name: Read the current survey specification
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ survey_job_template_id }}/survey_spec/"
+        method: GET
+        return_content: true
+        status_code: [200]
+      register: awx_survey
+      check_mode: false
+
+    - name: Fail if the survey has no site question
+      ansible.builtin.assert:
+        that:
+          - awx_survey.json.spec | default([]) | selectattr('variable', 'eq', 'site') | list | length > 0
+        fail_msg: >-
+          Job template {{ survey_job_template_id }} has no survey question with
+          variable 'site'. This playbook refreshes an existing question's
+          choices; it does not create the question.
+
+    # Rebuild the question list one question at a time. Every question other
+    # than site and target_host is copied through untouched, so unrelated
+    # survey fields survive.
+    - name: Build the updated question list
+      ansible.builtin.set_fact:
+        updated_spec: >-
+          {{
+            updated_spec | default([]) + [
+              item | combine({
+                'choices': survey_sites,
+                'default': item.default if item.default in survey_sites else survey_sites | first
+              })
+              if item.variable == 'site'
+              else (
+                item | combine({
+                  'choices': [''] + survey_devices,
+                  'default': item.default if item.default in survey_devices else ''
+                })
+                if item.variable == 'target_host'
+                else item
+              )
+            ]
+          }}
+      loop: "{{ awx_survey.json.spec }}"
+      loop_control:
+        label: "{{ item.variable }}"
+
+    - name: Report the pending change
+      ansible.builtin.debug:
+        msg:
+          - "sites in inventory : {{ survey_sites | join(', ') }}"
+          - "sites in survey now: {{ (awx_survey.json.spec | selectattr('variable', 'eq', 'site') | first).choices | default([]) | join(', ') }}"
+          - "devices in survey  : {{ survey_devices | join(', ') }}"
+
+    - name: Update the survey specification
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ survey_job_template_id }}/survey_spec/"
+        method: POST
+        body_format: json
+        body: "{{ awx_survey.json | combine({'spec': updated_spec}) }}"
+        status_code: [200, 201]
+      when:
+        - not ansible_check_mode
+        - updated_spec != awx_survey.json.spec
+      changed_when: true
