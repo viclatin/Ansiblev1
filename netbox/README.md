@@ -67,3 +67,55 @@ curl -s localhost:30080/api/status/ | python3 -m json.tool | grep netbox-version
 
 Rollback: `git revert` the manifest change and re-apply; the `netbox` database
 is untouched.
+
+## Verified outcome
+
+4.6.8 came up cleanly, superuser and API token created. Confirmed on the running
+instance:
+
+- `GET /api/status/` (authenticated) reports `netbox-version: 4.6.8`,
+  Django 6.0.8, Python 3.14.4. Note `/api/status/` now requires authentication;
+  unauthenticated it returns nulls rather than an error.
+- `OPTIONS /api/extras/custom-field-choice-sets/` exposes **`choice_colors`**, a
+  mapping of choice value to a named colour. Available colours: `blue`, `indigo`,
+  `purple`, `pink`, `red`, `orange`, `yellow`, `green`, `teal`, `cyan`, `gray`,
+  `black`, `white`. Colours are **named, not hex** — the 3.2.8-era plan referred
+  to hex values, which do not apply here.
+- Custom field types now include `decimal` and `datetime` alongside the previous
+  set.
+- Databases side by side: `netbox` (3.2.8, 19 MB, untouched) and `netbox4`
+  (4.6.8, 25 MB, live).
+
+## Compliance labels — UI steps
+
+**Customization -> Custom Field Choice Sets -> Add**, name `Compliance Status`:
+
+| Value | Label | Colour |
+| --- | --- | --- |
+| `compliant` | Compliant | green |
+| `partial` | Partial | yellow |
+| `non-compliant` | Non-Compliant | red |
+| `unknown` | Unknown | gray |
+
+**Customization -> Custom Fields -> Add**, object type **DCIM > Device**:
+
+| Name | Type | Notes |
+| --- | --- | --- |
+| `compliance_status` | Selection | the choice set above; default `unknown` |
+| `compliance_notes` | Long text | failed controls, human readable |
+| `compliance_score` | Integer | the 0-100 score |
+| `compliance_checked` | Date | makes a stale reading visible |
+
+The objects themselves (region, sites, manufacturer, device type, role,
+platform, device, interfaces, IP) must be recreated too - the exact values are
+in `snapshot/`. The platform slug must be **`ios`**: `group_vars/platforms_ios.yml`
+is keyed on it and `site-device-target.yml` asserts every target resolves an
+`ansible_network_os`.
+
+## Still outstanding
+
+- AWX credential 8 (`Netbox-API`) still holds the 3.2.8 token and will fail
+  against 4.6.8. It needs a **v1** token, because AWX injects `NETBOX_TOKEN` as
+  a bare string which `nb_inventory` sends as `Token <value>`; the auto-created
+  superuser token is v2 (`Bearer nbt_<key>.<token>`) and will not authenticate
+  that way.
