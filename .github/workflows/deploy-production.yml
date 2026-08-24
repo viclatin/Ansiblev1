@@ -24,6 +24,11 @@ on:
         type: choice
         options:
           - production_canary_switches
+      site:
+        description: NetBox site whose group compliance.yml targets
+        required: false
+        default: toronto
+        type: string
 
 permissions:
   actions: read
@@ -127,6 +132,7 @@ jobs:
         run: |
           ansible-playbook \
             -i inventories/production/hosts.ini \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/compliance.yml \
             --limit "${{ inputs.target_group }}"
 
@@ -148,6 +154,7 @@ jobs:
         run: |
           ansible-playbook \
             -i inventories/production/hosts.ini \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/compliance.yml \
             --limit "${{ inputs.target_group }}"
 

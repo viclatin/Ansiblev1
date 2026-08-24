@@ -3,29 +3,61 @@
   hosts: localhost
   gather_facts: false
   vars:
-    valid_sites:
-      - toronto
-    valid_site_hosts:
-      toronto:
-        - Victors-Switch
+    # Derived from the live inventory rather than hardcoded, so a site added in
+    # NetBox is selectable as soon as the AWX inventory source syncs. The guard
+    # rail is kept: an unknown site still fails loudly below.
+    valid_sites: >-
+      {{
+        groups.keys()
+        | select('match', '^sites_')
+        | map('regex_replace', '^sites_', '')
+        | sort
+        | list
+      }}
+    valid_site_hosts: "{{ groups['sites_' + site] | default([]) | sort }}"
 
   tasks:
     - name: Validate the selected site
       ansible.builtin.assert:
         that:
           - site is defined
+          - site | length > 0
           - site in valid_sites
-        fail_msg: "Invalid site '{{ site | default('') }}'. Valid sites: {{ valid_sites | join(', ') }}"
+        fail_msg: >-
+          Invalid site '{{ site | default('') }}'.
+          Sites currently in the inventory: {{ valid_sites | join(', ') }}.
+          If the site exists in NetBox but is missing here, re-sync the AWX
+          inventory source.
 
     - name: Validate the optional host against the chosen site
       ansible.builtin.assert:
         that:
-          - target_host is not defined or target_host == '' or target_host in valid_site_hosts[site]
-        fail_msg: "Invalid host '{{ target_host | default('') }}' for site '{{ site }}'. Valid hosts: {{ valid_site_hosts[site] | join(', ') }}"
+          - target_host is not defined or target_host | length == 0 or target_host in valid_site_hosts
+        fail_msg: >-
+          Invalid host '{{ target_host | default('') }}' for site '{{ site }}'.
+          Hosts at that site: {{ valid_site_hosts | join(', ') }}
 
     - name: Build the final target expression
       ansible.builtin.set_fact:
         selected_target: "{{ target_host if (target_host | default('')) | length > 0 else ('sites_' + site) }}"
+
+    - name: Confirm the target resolves to at least one host
+      ansible.builtin.assert:
+        that:
+          - (groups[selected_target] | default([selected_target])) | length > 0
+        fail_msg: "Target '{{ selected_target }}' matched no hosts in the inventory."
+
+    - name: Confirm the targeted hosts carry a network OS
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].ansible_network_os is defined
+        fail_msg: >-
+          Host '{{ item }}' has no ansible_network_os. Connection settings come
+          from group_vars/platforms_<slug>.yml, keyed on the device's NetBox
+          platform slug. Check the slug with:
+          ansible-inventory -i inventories/netbox.yml --graph
+        quiet: true
+      loop: "{{ groups[selected_target] | default([selected_target]) }}"
 
     - name: Show the resolved target
       ansible.builtin.debug:

@@ -19,6 +19,11 @@ on:
         description: Merged commit SHA to deploy
         required: true
         type: string
+      site:
+        description: NetBox site whose group compliance.yml targets
+        required: false
+        default: toronto
+        type: string
 
 permissions:
   contents: read
@@ -94,6 +99,7 @@ jobs:
           ansible-playbook \
             -i inventories/test/hosts.ini \
             --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/compliance.yml
 
       - name: Apply approved remediation in test
@@ -121,6 +127,7 @@ jobs:
           ansible-playbook \
             -i inventories/test/hosts.ini \
             --extra-vars "@${RUNNER_TEMP}/test_device_vars.json" \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/compliance.yml
 
       - name: Generate test result manifest

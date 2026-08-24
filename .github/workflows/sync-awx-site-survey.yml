@@ -1,0 +1,32 @@
+---
+name: Sync AWX Site Survey
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-awx-site-survey
+  cancel-in-progress: false
+
+jobs:
+  sync-survey:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Sync NetBox sites to AWX survey
+        env:
+          AWX_URL: ${{ vars.AWX_URL }}
+          AWX_OAUTH_TOKEN: ${{ secrets.AWX_OAUTH_TOKEN }}
+          AWX_INVENTORY_ID: ${{ vars.AWX_INVENTORY_ID }}
+          AWX_NETBOX_INVENTORY_SOURCE_ID: ${{ vars.AWX_NETBOX_INVENTORY_SOURCE_ID }}
+          AWX_COMPLIANCE_JOB_TEMPLATE_ID: ${{ vars.AWX_COMPLIANCE_JOB_TEMPLATE_ID }}
+          AWX_VERIFY_SSL: ${{ vars.AWX_VERIFY_SSL }}
+        run: python3 scripts/sync_awx_site_survey.py

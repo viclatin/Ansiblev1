@@ -1,6 +1,6 @@
 ---
 - name: Cisco IOS Compliance Validation
-  hosts: cisco
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
   gather_facts: false
   become: true
   become_method: ansible.netcommon.enable
