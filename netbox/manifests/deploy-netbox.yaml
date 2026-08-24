@@ -19,10 +19,15 @@ spec:
         - name: SECRET_KEY
           valueFrom:
             secretKeyRef:
-              key: SECRET_KEY
+              key: SECRET_KEY_V4
+              name: netbox-secrets
+        - name: API_TOKEN_PEPPER_1
+          valueFrom:
+            secretKeyRef:
+              key: API_TOKEN_PEPPER_1
               name: netbox-secrets
         - name: DB_NAME
-          value: netbox
+          value: netbox4
         - name: DB_USER
           value: netbox
         - name: DB_PASSWORD
@@ -56,15 +61,20 @@ spec:
         - name: SUPERUSER_API_TOKEN
           valueFrom:
             secretKeyRef:
-              key: SUPERUSER_API_TOKEN
+              key: SUPERUSER_API_TOKEN_V4
               name: netbox-secrets
-        image: netboxcommunity/netbox:v3.2.8
+        - name: SUPERUSER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: SUPERUSER_API_KEY
+              name: netbox-secrets
+        image: netboxcommunity/netbox:v4.6.8
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /
             port: 8080
-          initialDelaySeconds: 60
+          initialDelaySeconds: 180
           periodSeconds: 20
         name: netbox
         ports:
@@ -73,5 +83,11 @@ spec:
           httpGet:
             path: /
             port: 8080
-          initialDelaySeconds: 30
+          initialDelaySeconds: 90
+          periodSeconds: 10
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8080
+          failureThreshold: 60
           periodSeconds: 10
