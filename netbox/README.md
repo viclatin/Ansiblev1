@@ -119,3 +119,19 @@ is keyed on it and `site-device-target.yml` asserts every target resolves an
   a bare string which `nb_inventory` sends as `Token <value>`; the auto-created
   superuser token is v2 (`Bearer nbt_<key>.<token>`) and will not authenticate
   that way.
+
+## scripts/restore_snapshot.py
+
+Recreates everything in `snapshot/` against a NetBox instance, in dependency
+order, idempotently — an object that already exists is looked up and reused, so
+re-running creates nothing.
+
+```bash
+export NETBOX_URL=http://localhost:30080
+export NETBOX_AUTH="Bearer nbt_<key>.<token>"   # or "Token <value>" for a v1 token
+python3 netbox/scripts/restore_snapshot.py
+```
+
+It handles the one schema rename that matters across the 3.x/4.x boundary: a
+device's `device_role` became `role`. Re-pointing each device's `primary_ip4`
+happens after the IP is created, since the address must exist first.
