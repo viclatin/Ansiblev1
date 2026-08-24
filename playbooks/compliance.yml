@@ -150,3 +150,72 @@
           passed_controls: "{{ passed_controls }}"
           failed_controls: "{{ failed_controls }}"
           results: "{{ compliance_results }}"
+
+    # ------------------------------------------------------------------
+    # Publish the result onto the device in NetBox, so an engineer sees a
+    # coloured status against the switch instead of reading JSON reports.
+    # Skipped when no NetBox credential is present, which is how the GitHub
+    # workflows run this playbook.
+    # ------------------------------------------------------------------
+    - name: Publish compliance status to NetBox
+      when: lookup('ansible.builtin.env', 'NETBOX_API') | length > 0
+      delegate_to: localhost
+      vars:
+        netbox_api: "{{ lookup('ansible.builtin.env', 'NETBOX_API') | regex_replace('/$', '') }}"
+        netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+        # Explicit map rather than a lower/replace chain: an unexpected status
+        # then fails loudly instead of writing a value the choice set rejects.
+        netbox_status_map:
+          COMPLIANT: compliant
+          PARTIAL: partial
+          NON_COMPLIANT: non-compliant
+      module_defaults:
+        ansible.builtin.uri:
+          headers:
+            Authorization: "Token {{ netbox_token }}"
+            Content-Type: application/json
+          validate_certs: false
+      block:
+        - name: Confirm the compliance status maps to a NetBox choice
+          ansible.builtin.assert:
+            that:
+              - (compliance_status | trim) in netbox_status_map
+            fail_msg: >-
+              Compliance status '{{ compliance_status | trim }}' has no NetBox
+              choice. Update netbox_status_map and the Compliance Status choice
+              set together.
+
+        - name: Find the device in NetBox
+          ansible.builtin.uri:
+            url: "{{ netbox_api }}/api/dcim/devices/?name={{ inventory_hostname | urlencode }}"
+            method: GET
+            status_code: [200]
+          register: netbox_device
+          no_log: true
+
+        - name: Warn when the device is absent from NetBox
+          ansible.builtin.debug:
+            msg: >-
+              '{{ inventory_hostname }}' was not found in NetBox; its compliance
+              status was not published.
+          when: netbox_device.json.count == 0
+
+        - name: Write the compliance result onto the device
+          ansible.builtin.uri:
+            url: "{{ netbox_api }}/api/dcim/devices/{{ netbox_device.json.results[0].id }}/"
+            method: PATCH
+            body_format: json
+            body:
+              custom_fields:
+                compliance_status: "{{ netbox_status_map[compliance_status | trim] }}"
+                compliance_score: "{{ compliance_score | int }}"
+                compliance_checked: "{{ '%Y-%m-%d' | strftime }}"
+                compliance_notes: >-
+                  {{
+                    'Failed controls: ' + (failed_controls | join(', '))
+                    if failed_controls | length > 0
+                    else 'All ' ~ (total_checks | int) ~ ' controls passing.'
+                  }}
+            status_code: [200]
+          when: netbox_device.json.count > 0
+          changed_when: true
