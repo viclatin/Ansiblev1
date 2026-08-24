@@ -1,0 +1,22 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "url": "http://localhost:30080/api/dcim/regions/1/",
+            "display": "AMER",
+            "name": "AMER",
+            "slug": "amer",
+            "parent": null,
+            "description": "",
+            "tags": [],
+            "custom_fields": {},
+            "created": "2026-08-18T01:49:04.943951Z",
+            "last_updated": "2026-08-18T01:49:04.943981Z",
+            "site_count": 1,
+            "_depth": 0
+        }
+    ]
+}

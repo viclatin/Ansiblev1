@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations: {}
+  name: postgresql
+  namespace: netbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+      - env:
+        - name: POSTGRES_DB
+          value: netbox
+        - name: POSTGRES_USER
+          value: netbox
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: DB_PASSWORD
+              name: netbox-secrets
+        image: postgres:16-alpine
+        imagePullPolicy: IfNotPresent
+        name: postgres
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres-data
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: netbox-postgres-data

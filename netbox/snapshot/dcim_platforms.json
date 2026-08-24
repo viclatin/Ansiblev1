@@ -1,0 +1,30 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "url": "http://localhost:30080/api/dcim/platforms/1/",
+            "display": "Cisco IOS",
+            "name": "Cisco IOS",
+            "slug": "ios",
+            "manufacturer": {
+                "id": 1,
+                "url": "http://localhost:30080/api/dcim/manufacturers/1/",
+                "display": "Cisco",
+                "name": "Cisco",
+                "slug": "cisco"
+            },
+            "napalm_driver": "",
+            "napalm_args": null,
+            "description": "",
+            "tags": [],
+            "custom_fields": {},
+            "created": "2026-08-18T01:42:45.920792Z",
+            "last_updated": "2026-08-18T01:42:45.920825Z",
+            "device_count": 1,
+            "virtualmachine_count": 0
+        }
+    ]
+}

@@ -1,0 +1,23 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "url": "http://localhost:30080/api/dcim/device-roles/1/",
+            "display": "Access",
+            "name": "Access",
+            "slug": "access",
+            "color": "ffc107",
+            "vm_role": true,
+            "description": "",
+            "tags": [],
+            "custom_fields": {},
+            "created": "2026-08-18T00:45:04.614289Z",
+            "last_updated": "2026-08-18T01:41:49.107265Z",
+            "device_count": 1,
+            "virtualmachine_count": 0
+        }
+    ]
+}

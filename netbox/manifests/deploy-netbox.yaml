@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations: {}
+  name: netbox
+  namespace: netbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: netbox
+  template:
+    metadata:
+      labels:
+        app: netbox
+    spec:
+      containers:
+      - env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: SECRET_KEY
+              name: netbox-secrets
+        - name: DB_NAME
+          value: netbox
+        - name: DB_USER
+          value: netbox
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: DB_PASSWORD
+              name: netbox-secrets
+        - name: DB_HOST
+          value: postgresql
+        - name: DB_PORT
+          value: '5432'
+        - name: REDIS_HOST
+          value: redis
+        - name: REDIS_PORT
+          value: '6379'
+        - name: REDIS_DB
+          value: '0'
+        - name: ALLOWED_HOSTS
+          value: '*'
+        - name: CSRF_TRUSTED_ORIGINS
+          value: http://*
+        - name: SUPERUSER_NAME
+          value: admin
+        - name: SUPERUSER_EMAIL
+          value: admin@local.test
+        - name: SUPERUSER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: SUPERUSER_PASSWORD
+              name: netbox-secrets
+        - name: SUPERUSER_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: SUPERUSER_API_TOKEN
+              name: netbox-secrets
+        image: netboxcommunity/netbox:v3.2.8
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 20
+        name: netbox
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10

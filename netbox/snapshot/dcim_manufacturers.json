@@ -1,0 +1,22 @@
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "url": "http://localhost:30080/api/dcim/manufacturers/1/",
+            "display": "Cisco",
+            "name": "Cisco",
+            "slug": "cisco",
+            "description": "",
+            "tags": [],
+            "custom_fields": {},
+            "created": "2026-08-18T00:45:42.071829Z",
+            "last_updated": "2026-08-18T00:45:42.071848Z",
+            "devicetype_count": 1,
+            "inventoryitem_count": 0,
+            "platform_count": 1
+        }
+    ]
+}
