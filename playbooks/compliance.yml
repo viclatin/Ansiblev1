@@ -1,6 +1,11 @@
 ---
 - name: Cisco IOS Compliance Validation
   hosts: "{{ target_host | default('sites_' + site, true) }}"
+  # The remediation and rollback wrappers import this play and launch with
+  # job_tags set to a control. Without 'always' the whole assessment would be
+  # filtered out and skipped, and the job would still report success.
+  tags:
+    - always
   gather_facts: false
   become: true
   become_method: ansible.netcommon.enable
@@ -158,7 +163,12 @@
     # workflows run this playbook.
     # ------------------------------------------------------------------
     - name: Publish compliance status to NetBox
-      when: lookup('ansible.builtin.env', 'NETBOX_API') | length > 0
+      # Ansible skips uri in check mode, which would leave netbox_device
+      # without .json and break the PATCH's when. A dry run must leave NetBox
+      # untouched anyway - that is what makes the unchanged chip meaningful.
+      when:
+        - not ansible_check_mode
+        - lookup('ansible.builtin.env', 'NETBOX_API') | length > 0
       delegate_to: localhost
       vars:
         netbox_api: "{{ lookup('ansible.builtin.env', 'NETBOX_API') | regex_replace('/$', '') }}"
