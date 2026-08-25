@@ -1,6 +1,8 @@
 ---
 - name: Remediate AAA Control
-  hosts: cisco
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - aaa
   gather_facts: false
 
   vars:

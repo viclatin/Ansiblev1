@@ -1,0 +1,105 @@
+# Remediate from the NetBox device page
+
+A **Remediate** button on a device in NetBox launches the matching remediation
+playbook in AWX against that device.
+
+## Why it is built this way
+
+A NetBox custom link cannot call the AWX API. Its whole schema is `link_text`,
+`link_url`, `button_class`, `new_window` — it renders an `<a href>` and performs
+a browser GET, so it can neither POST to AWX's launch endpoint nor carry an API
+token. The link is therefore only an entry point; a **custom script** does the
+work.
+
+The link works because NetBox prefills a script's form from query parameters
+(`ScriptView.get` calls `as_form(initial=normalize_querydict(request.GET))`), so
+`?device={{ object.pk }}` arrives with the device already selected.
+
+The control is selected with **Ansible tags**, not a variable. Each remediation
+play carries a play-level tag, and AWX passes `job_tags` at launch. A templated
+`import_playbook: remediate_{{ control }}.yml` was rejected: imports resolve at
+parse time, before any assert can run, so an unvalidated value would be
+interpolated straight into a file path.
+
+## Setup
+
+### 1. AWX job template
+
+Create **Network - Remediation**:
+
+| Setting | Value |
+| --- | --- |
+| Playbook | `playbooks/remediate-target.yml` |
+| Project | Network Automation GitHub Project 3 |
+| Inventory | NetBox Demo Inventory |
+| Credentials | Cisco Lab SSH, Netbox-API |
+| Prompt on launch | **Variables**, **Job Tags**, **Job Type** |
+
+All three prompts are required: variables carry the device and site, job tags
+carry the control, and job type allows a check-mode dry run. A template without
+them silently ignores what the script sends.
+
+### 2. NetBox configuration
+
+Add to NetBox's `configuration.py`:
+
+```python
+AWX_URL = "http://192.168.1.95:30765"
+AWX_TOKEN = "<AWX OAuth token permitted to launch this template>"
+AWX_REMEDIATION_JT = <job template id>
+```
+
+Use an AWX token belonging to a user who can launch only this template, not a
+full admin token — NetBox will hold it at rest.
+
+### 3. Custom script
+
+Customization → Scripts → Add, uploading `netbox/scripts/remediation.py`. It
+registers as `remediation.RemediateDevice`.
+
+### 4. Custom link — the button
+
+Customization → Custom Links → Add:
+
+| Field | Value |
+| --- | --- |
+| Object types | DCIM > Device |
+| Name | `remediate` |
+| Link text | `Remediate` |
+| Link URL | `/extras/scripts/remediation.RemediateDevice/?device={{ object.pk }}` |
+| Button class | Red |
+| New window | yes |
+
+To show the button only on non-compliant devices, make the link text
+conditional — a custom link whose text renders empty is not displayed:
+
+```jinja
+{% if object.cf.compliance_status != 'compliant' %}Remediate{% endif %}
+```
+
+## Using it
+
+1. Open a device whose compliance chip is amber or red.
+2. Click **Remediate**. The script form opens with the device filled in.
+3. Pick the control. **Dry run is on by default** — it launches the AWX job as
+   `job_type: check`, so `cisco.ios.ios_config` reports the change without
+   applying it.
+4. Review the AWX job linked in the script output.
+5. Re-run with dry run cleared to apply, then re-run compliance to refresh the
+   chip.
+
+## Safety
+
+- **An untagged run is refused.** Without a control tag the wrapper would apply
+  all six remediations at once, so it asserts a tag was given.
+- **Validation always runs.** The wrapper's validation play is tagged `always`;
+  without that, a tagged run would skip the site allowlist and host checks
+  entirely.
+- **Only SYSLOG can be verified and reverted.** It is the sole control with
+  validation and rollback playbooks. The script warns when applying any of the
+  other five for real.
+- **No automatic remediation.** There is deliberately no Event Rule firing on a
+  compliance change. That would reconfigure switches with no human approval and
+  bypass the change-manifest governance in this repository — `test_required`,
+  `production_approval_required`, `production_target_allowlist` and the GitHub
+  Actions promotion flow.

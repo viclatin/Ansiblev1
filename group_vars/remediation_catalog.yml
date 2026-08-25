@@ -24,8 +24,10 @@ remediation_catalog:
     severity: medium
 
     playbook: playbooks/remediation/remediate_http.yml
-    validation_playbook: playbooks/validation/validate_http.yml
-    rollback_playbook: playbooks/rollback/rollback_http.yml
+    # No validation or rollback playbook exists for HTTP yet. SYSLOG is
+    # currently the only control with a complete remediate/validate/rollback
+    # set; the other five can be remediated but not automatically verified or
+    # reverted. Add the files before relying on this control in production.
 
     test_required: true
     production_approval_required: true

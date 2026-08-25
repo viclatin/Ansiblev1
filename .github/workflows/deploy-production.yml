@@ -125,6 +125,7 @@ jobs:
         run: |
           ansible-playbook \
             -i inventories/production/hosts.ini \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/backup.yml \
             --limit "${{ inputs.target_group }}"
 
@@ -140,6 +141,7 @@ jobs:
         run: |
           ansible-playbook \
             -i inventories/production/hosts.ini \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/remediation/remediate_syslog.yml \
             --limit "${{ inputs.target_group }}"
 
@@ -147,6 +149,7 @@ jobs:
         run: |
           ansible-playbook \
             -i inventories/production/hosts.ini \
+            --extra-vars "site=${{ inputs.site }}" \
             playbooks/validation/validate_syslog.yml \
             --limit "${{ inputs.target_group }}"
 

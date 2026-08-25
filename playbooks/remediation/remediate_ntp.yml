@@ -1,6 +1,8 @@
 ---
 - name: Remediate NTP Control
-  hosts: cisco
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - ntp
   gather_facts: false
 
   vars:
