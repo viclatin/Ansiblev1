@@ -107,3 +107,9 @@
 
 - name: Roll back the selected control
   import_playbook: rollback/rollback_all.yml
+
+# Re-score the device in the same job so the NetBox chip is correct the moment
+# this finishes, rather than waiting for the hourly compliance schedule. In
+# check mode the assessment still runs but publishes nothing.
+- name: Re-assess compliance after the rollback
+  import_playbook: compliance.yml

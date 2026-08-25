@@ -24,11 +24,22 @@ there, not in the web pod.
 
 import json
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from dcim.models import Device
+from django.contrib.contenttypes.models import ContentType
+from extras.choices import JournalEntryKindChoices
+from extras.models import JournalEntry
 from extras.scripts import BooleanVar, ChoiceVar, ObjectVar, Script
+
+# The AWX job usually finishes in well under a minute (remediation runs measured
+# 12-19s, the compliance re-assessment 18-20s). The cap is generous so a slow
+# device reports "still running" rather than a false failure.
+AWX_POLL_SECONDS = 5
+AWX_TIMEOUT_SECONDS = 300
+AWX_TERMINAL = {"successful", "failed", "error", "canceled"}
 
 # Must match the play-level tags in playbooks/remediation/remediate_*.yml.
 # The AWX job template refuses an untagged run, so one of these is always sent.
@@ -44,6 +55,15 @@ CONTROL_CHOICES = (
 # Only SYSLOG has validation and rollback playbooks; the rest apply without an
 # automated way to verify or revert. Surfaced in the UI so the engineer knows.
 CONTROLS_WITHOUT_ROLLBACK = {"aaa", "ntp", "snmp", "ssh", "http"}
+
+
+def _awx_get(url, token, path):
+    request = Request(
+        f"{url}{path}",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    with urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def failing_controls(device):
@@ -78,7 +98,11 @@ class RemediateDevice(Script):
         name = "Remediate Device"
         description = "Launch the AWX remediation job for one control on this device"
         field_order = ["device", "control", "dry_run"]
-        commit_default = False
+        # The script writes a JournalEntry recording each run, and NetBox rolls
+        # database writes back unless the run is committed. NOTE: this checkbox
+        # governs NetBox database writes only. Whether the SWITCH is touched is
+        # controlled by dry_run below - the two are unrelated.
+        commit_default = True
 
     device = ObjectVar(
         model=Device,
@@ -219,8 +243,90 @@ class RemediateDevice(Script):
             return "Launch failed."
 
         job_id = result.get("id") or result.get("job")
-        self.log_success(
-            f"AWX job {job_id} launched: "
-            f"{awx_url}/#/jobs/playbook/{job_id}/output"
+        job_url = f"{awx_url}/#/jobs/playbook/{job_id}/output"
+        self.log_info(f"AWX job {job_id} launched: {job_url}")
+
+        # Wait for it, rather than returning immediately. A fire-and-forget
+        # launch made success, failure and a dry run all look identical from
+        # NetBox.
+        status = self._wait_for_job(awx_url, awx_token, job_id)
+
+        if status is None:
+            self.log_warning(
+                f"AWX job {job_id} was still running after "
+                f"{AWX_TIMEOUT_SECONDS}s. It has not failed - follow it at "
+                f"{job_url}."
+            )
+            self._journal(device, control, dry_run, job_id, job_url,
+                          JournalEntryKindChoices.KIND_WARNING, "still running")
+            return f"AWX job {job_id} still running; see {job_url}."
+
+        if status != "successful":
+            self.log_failure(f"AWX job {job_id} ended as '{status}'. See {job_url}.")
+            self._journal(device, control, dry_run, job_id, job_url,
+                          JournalEntryKindChoices.KIND_DANGER, status)
+            return f"AWX job {job_id} {status}."
+
+        if dry_run:
+            self.log_success(
+                f"Check-mode run finished. Nothing was changed on "
+                f"{device.name} and NetBox was not updated. Review {job_url}, "
+                f"then re-run with Dry run cleared to apply."
+            )
+            self._journal(device, control, dry_run, job_id, job_url,
+                          JournalEntryKindChoices.KIND_INFO, "checked")
+            return f"Dry run complete for {control.upper()} on {device.name}."
+
+        # The job re-assesses compliance and republishes before it ends, so the
+        # device record is already current by the time we get here.
+        device.refresh_from_db()
+        new_status = device.cf.get("compliance_status") or "unknown"
+        new_score = device.cf.get("compliance_score")
+        summary = (
+            f"{control.upper()} applied to {device.name}. "
+            f"Now {new_status.upper()} ({new_score}/100)."
         )
-        return f"Launched AWX job {job_id} for {control.upper()} on {device.name}."
+        if new_status == "compliant":
+            self.log_success(summary)
+            kind = JournalEntryKindChoices.KIND_SUCCESS
+        else:
+            # The playbook can succeed while the device stays non-compliant,
+            # because other controls may still be failing.
+            still = failing_controls(device)
+            self.log_warning(
+                f"{summary} Still failing: "
+                f"{', '.join(c.upper() for c in still) or 'unknown'}."
+            )
+            kind = JournalEntryKindChoices.KIND_WARNING
+        self._journal(device, control, dry_run, job_id, job_url, kind,
+                      f"{new_status} ({new_score}/100)")
+        return summary
+
+    def _wait_for_job(self, awx_url, awx_token, job_id):
+        """Poll until the AWX job reaches a terminal state, or None on timeout."""
+        deadline = time.monotonic() + AWX_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                job = _awx_get(awx_url, awx_token, f"/api/v2/jobs/{job_id}/")
+            except (HTTPError, URLError) as error:
+                self.log_warning(f"Could not read AWX job {job_id}: {error}")
+                return None
+            status = job.get("status")
+            if status in AWX_TERMINAL:
+                return status
+            time.sleep(AWX_POLL_SECONDS)
+        return None
+
+    def _journal(self, device, control, dry_run, job_id, job_url, kind, outcome):
+        """Record the run on the device, so the history outlives the job log."""
+        JournalEntry.objects.create(
+            assigned_object_type=ContentType.objects.get_for_model(Device),
+            assigned_object_id=device.pk,
+            created_by=self.request.user if getattr(self, "request", None) else None,
+            kind=kind,
+            comments=(
+                f"**{control.upper()} remediation "
+                f"{'(dry run)' if dry_run else '(applied)'}** - {outcome}.\n\n"
+                f"AWX job [{job_id}]({job_url})."
+            ),
+        )
