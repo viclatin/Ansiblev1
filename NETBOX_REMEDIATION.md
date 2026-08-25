@@ -84,6 +84,18 @@ With `compliance_notes` of `Failed controls: SYSLOG` that yields
 first; with none it omits the parameter and the dropdown falls back to its own
 default.
 
+The script also **narrows the dropdown to the failing controls**. A `ChoiceVar`
+fixes its choices when the class is defined, so this happens in an `as_form`
+override that reads the device out of `initial` and filters the rendered
+field. A device failing NTP and HTTP therefore offers exactly those two, with
+NTP preselected.
+
+Only the GET that renders the form carries `initial`; the POST that submits it
+does not. Validation therefore still runs against the full choice list, so a
+narrowed form cannot reject its own submission, and an API-driven run may still
+name any control. Devices with nothing failing keep the full list, so a control
+can be deliberately re-applied.
+
 To show the button only on non-compliant devices, make the link text
 conditional — a custom link whose text renders empty is not displayed:
 

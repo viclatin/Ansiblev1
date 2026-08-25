@@ -63,6 +63,19 @@ data:
         return [c.strip().lower() for c in listed.split(",") if c.strip()]
 
 
+    def _device_from_initial(initial):
+        """Resolve the device a form is being rendered for, or None."""
+        if not initial:
+            return None
+        value = initial.get("device")
+        if isinstance(value, Device):
+            return value
+        try:
+            return Device.objects.get(pk=int(value))
+        except (TypeError, ValueError, Device.DoesNotExist):
+            return None
+
+
     class RemediateDevice(Script):
         class Meta:
             name = "Remediate Device"
@@ -78,6 +91,39 @@ data:
             choices=CONTROL_CHOICES,
             description="Which compliance control to remediate",
         )
+        def as_form(self, data=None, files=None, initial=None):
+            """Narrow the control list to the device's failing controls.
+
+            A ChoiceVar's choices are fixed when the class is defined, so the
+            filtering has to happen on the rendered form. The device arrives in
+            `initial` from the ?device= query parameter the Remediate button sets.
+
+            Only the GET that renders the form carries `initial`; the POST that
+            submits it does not, so validation still runs against the full choice
+            list and a narrowed form cannot reject its own submission.
+            """
+            form = super().as_form(data, files, initial)
+            device = _device_from_initial(initial)
+            if device is None:
+                return form
+
+            failing = failing_controls(device)
+            if failing:
+                form.fields["control"].choices = [
+                    choice for choice in CONTROL_CHOICES if choice[0] in failing
+                ]
+                form.fields["control"].help_text = (
+                    f"Showing only the controls failing on {device.name} as of "
+                    f"{device.cf.get('compliance_checked') or 'the last assessment'}."
+                )
+            else:
+                form.fields["control"].help_text = (
+                    f"{device.name} has no failing controls recorded, so every "
+                    f"control is listed. Re-run the compliance assessment if that "
+                    f"looks out of date."
+                )
+            return form
+
         dry_run = BooleanVar(
             default=True,
             label="Dry run",
