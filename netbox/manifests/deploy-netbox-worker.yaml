@@ -2,17 +2,17 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   annotations: {}
-  name: netbox
+  name: netbox-worker
   namespace: netbox
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: netbox
+      app: netbox-worker
   template:
     metadata:
       labels:
-        app: netbox
+        app: netbox-worker
     spec:
       containers:
       - env:
@@ -49,25 +49,8 @@ spec:
           value: '*'
         - name: CSRF_TRUSTED_ORIGINS
           value: http://*
-        - name: SUPERUSER_NAME
-          value: admin
-        - name: SUPERUSER_EMAIL
-          value: admin@local.test
-        - name: SUPERUSER_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: SUPERUSER_PASSWORD
-              name: netbox-secrets
-        - name: SUPERUSER_API_TOKEN
-          valueFrom:
-            secretKeyRef:
-              key: SUPERUSER_API_TOKEN_V4
-              name: netbox-secrets
-        - name: SUPERUSER_API_KEY
-          valueFrom:
-            secretKeyRef:
-              key: SUPERUSER_API_KEY
-              name: netbox-secrets
+        - name: SKIP_SUPERUSER
+          value: 'true'
         - name: AWX_URL
           value: http://192.168.1.95:30765
         - name: AWX_REMEDIATION_JT
@@ -79,27 +62,16 @@ spec:
               name: netbox-secrets
         image: netboxcommunity/netbox:v4.6.8
         imagePullPolicy: IfNotPresent
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 180
-          periodSeconds: 20
-        name: netbox
-        ports:
-        - containerPort: 8080
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 90
-          periodSeconds: 10
-        startupProbe:
-          httpGet:
-            path: /
-            port: 8080
-          failureThreshold: 60
-          periodSeconds: 10
+        name: netbox-worker
+        command:
+        - /opt/netbox/docker-entrypoint.sh
+        args:
+        - /opt/netbox/venv/bin/python
+        - /opt/netbox/netbox/manage.py
+        - rqworker
+        - high
+        - default
+        - low
         volumeMounts:
         - name: netbox-scripts
           mountPath: /opt/netbox/netbox/scripts/remediation.py
