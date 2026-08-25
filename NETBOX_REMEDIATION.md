@@ -66,9 +66,35 @@ Customization → Custom Links → Add:
 | Object types | DCIM > Device |
 | Name | `remediate` |
 | Link text | `Remediate` |
-| Link URL | `/extras/scripts/remediation.RemediateDevice/?device={{ object.pk }}` |
+| Link URL | see below |
 | Button class | Red |
 | New window | yes |
+
+The link URL also preselects the failing control, so the engineer usually only
+has to confirm. A `ChoiceVar` default is a class attribute and cannot depend on
+the chosen device, but NetBox prefills a script form from every query
+parameter — so the preselection is done here, where the device is in scope:
+
+```jinja
+/extras/scripts/remediation.RemediateDevice/?device={{ object.pk }}{% if object.cf.compliance_notes and object.cf.compliance_notes.startswith('Failed controls:') %}&control={{ object.cf.compliance_notes.split(':')[1].split(',')[0].strip().lower() }}{% endif %}
+```
+
+With `compliance_notes` of `Failed controls: SYSLOG` that yields
+`?device=1&control=syslog`. With several failing controls it preselects the
+first; with none it omits the parameter and the dropdown falls back to its own
+default.
+
+The script also **narrows the dropdown to the failing controls**. A `ChoiceVar`
+fixes its choices when the class is defined, so this happens in an `as_form`
+override that reads the device out of `initial` and filters the rendered
+field. A device failing NTP and HTTP therefore offers exactly those two, with
+NTP preselected.
+
+Only the GET that renders the form carries `initial`; the POST that submits it
+does not. Validation therefore still runs against the full choice list, so a
+narrowed form cannot reject its own submission, and an API-driven run may still
+name any control. Devices with nothing failing keep the full list, so a control
+can be deliberately re-applied.
 
 To show the button only on non-compliant devices, make the link text
 conditional — a custom link whose text renders empty is not displayed:
@@ -98,6 +124,11 @@ conditional — a custom link whose text renders empty is not displayed:
 - **Only SYSLOG can be verified and reverted.** It is the sole control with
   validation and rollback playbooks. The script warns when applying any of the
   other five for real.
+- **Mismatched and pointless runs are flagged.** The script reads the device's
+  own `compliance_notes` and warns if the chosen control is not among the
+  failing ones, or if the device reports no failing controls at all (naming the
+  `compliance_checked` date, since a stale reading is the usual cause). It
+  warns rather than blocks: re-applying a control deliberately is legitimate.
 - **No automatic remediation.** There is deliberately no Event Rule firing on a
   compliance change. That would reconfigure switches with no human approval and
   bypass the change-manifest governance in this repository — `test_required`,

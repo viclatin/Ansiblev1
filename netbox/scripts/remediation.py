@@ -46,6 +46,33 @@ CONTROL_CHOICES = (
 CONTROLS_WITHOUT_ROLLBACK = {"aaa", "ntp", "snmp", "ssh", "http"}
 
 
+def failing_controls(device):
+    """Return the controls the last compliance run recorded as failing.
+
+    compliance_notes is written by playbooks/compliance.yml as either
+    "Failed controls: SYSLOG, HTTP" or "All 6 controls passing.".
+    """
+    notes = (device.cf.get("compliance_notes") or "").strip()
+    marker = "Failed controls:"
+    if not notes.startswith(marker):
+        return []
+    listed = notes[len(marker):]
+    return [c.strip().lower() for c in listed.split(",") if c.strip()]
+
+
+def _device_from_initial(initial):
+    """Resolve the device a form is being rendered for, or None."""
+    if not initial:
+        return None
+    value = initial.get("device")
+    if isinstance(value, Device):
+        return value
+    try:
+        return Device.objects.get(pk=int(value))
+    except (TypeError, ValueError, Device.DoesNotExist):
+        return None
+
+
 class RemediateDevice(Script):
     class Meta:
         name = "Remediate Device"
@@ -61,6 +88,39 @@ class RemediateDevice(Script):
         choices=CONTROL_CHOICES,
         description="Which compliance control to remediate",
     )
+    def as_form(self, data=None, files=None, initial=None):
+        """Narrow the control list to the device's failing controls.
+
+        A ChoiceVar's choices are fixed when the class is defined, so the
+        filtering has to happen on the rendered form. The device arrives in
+        `initial` from the ?device= query parameter the Remediate button sets.
+
+        Only the GET that renders the form carries `initial`; the POST that
+        submits it does not, so validation still runs against the full choice
+        list and a narrowed form cannot reject its own submission.
+        """
+        form = super().as_form(data, files, initial)
+        device = _device_from_initial(initial)
+        if device is None:
+            return form
+
+        failing = failing_controls(device)
+        if failing:
+            form.fields["control"].choices = [
+                choice for choice in CONTROL_CHOICES if choice[0] in failing
+            ]
+            form.fields["control"].help_text = (
+                f"Showing only the controls failing on {device.name} as of "
+                f"{device.cf.get('compliance_checked') or 'the last assessment'}."
+            )
+        else:
+            form.fields["control"].help_text = (
+                f"{device.name} has no failing controls recorded, so every "
+                f"control is listed. Re-run the compliance assessment if that "
+                f"looks out of date."
+            )
+        return form
+
     dry_run = BooleanVar(
         default=True,
         label="Dry run",
@@ -108,6 +168,24 @@ class RemediateDevice(Script):
             "job_tags": control,
             "job_type": "check" if dry_run else "run",
         }
+
+        failing = failing_controls(device)
+        status = device.cf.get("compliance_status")
+        if not failing:
+            self.log_warning(
+                f"{device.name} reports compliance_status "
+                f"'{status or 'unknown'}' with no failing controls recorded. "
+                f"Remediating {control.upper()} may change nothing. Re-run the "
+                f"compliance assessment if this reading looks stale "
+                f"(last checked: {device.cf.get('compliance_checked') or 'never'})."
+            )
+        elif control not in failing:
+            self.log_warning(
+                f"{control.upper()} is not among the failing controls on "
+                f"{device.name}. Currently failing: "
+                f"{', '.join(c.upper() for c in failing)}. Continuing anyway, "
+                f"but this run will most likely change nothing."
+            )
 
         self.log_info(
             f"Launching {control.upper()} remediation against {device.name} "
