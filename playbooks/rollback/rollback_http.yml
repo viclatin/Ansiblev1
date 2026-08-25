@@ -1,0 +1,34 @@
+---
+# Reverses playbooks/remediation/remediate_http.yml by re-enabling the HTTP
+# server.
+#
+# This deliberately re-introduces the finding HTTP-001 exists to prevent: an
+# unencrypted management plane. The device will be non-compliant afterwards and
+# the compliance chip in NetBox will go amber or red on the next assessment.
+# Only roll this back if disabling HTTP broke something that matters more.
+- name: Roll back Cisco IOS-XE HTTP change
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - http
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  tasks:
+    - name: Confirm re-enabling insecure HTTP management is intended
+      ansible.builtin.assert:
+        that:
+          - rollback_confirm_disruptive | default(false) | bool
+        fail_msg: >-
+          This rollback re-enables the plaintext HTTP server, which control
+          HTTP-001 requires to be absent. Re-run with
+          rollback_confirm_disruptive=true if that is genuinely what you want.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Re-enable the HTTP server
+      cisco.ios.ios_config:
+        lines:
+          - ip http server
+        save_when: modified

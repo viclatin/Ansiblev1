@@ -1,0 +1,20 @@
+---
+# Every rollback play, each carrying its control tag. Nothing runs unless a tag
+# selects it - see playbooks/rollback-target.yml, which refuses an untagged run.
+- name: Roll back AAA control
+  import_playbook: rollback_aaa.yml
+
+- name: Roll back NTP control
+  import_playbook: rollback_ntp.yml
+
+- name: Roll back SNMP control
+  import_playbook: rollback_snmp.yml
+
+- name: Roll back SYSLOG control
+  import_playbook: rollback_syslog.yml
+
+- name: Roll back SSH control
+  import_playbook: rollback_ssh.yml
+
+- name: Roll back HTTP control
+  import_playbook: rollback_http.yml

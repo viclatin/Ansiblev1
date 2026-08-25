@@ -4,6 +4,8 @@
   tags:
     - ssh
   gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
 
   vars:
     backups_dir: "{{ playbook_dir }}/../../backups"
@@ -24,6 +26,16 @@
     report_suffix: ssh_remediation.json
 
   tasks:
+    - name: Ensure backup and report directories exist
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ backups_dir }}"
+        - "{{ reports_dir }}"
+
     - name: Gather IOS facts
       cisco.ios.ios_facts:
 
@@ -45,6 +57,7 @@
 
     - name: Apply SSH remediation
       cisco.ios.ios_config:
+        save_when: modified
         parents:
           - line vty 0 4
         lines: "{{ remediation_commands }}"
@@ -81,7 +94,17 @@
         content: "{{ remediation_report | to_nice_json }}"
         dest: "{{ reports_dir }}/{{ ansible_net_hostname | default(inventory_hostname) }}_{{ report_suffix }}"
 
+    - name: Report that validation is not meaningful in check mode
+      ansible.builtin.debug:
+        msg: >-
+          Check mode: the SSH configuration was not applied, so the validation
+          above reflects the device as it stands, not the outcome. Re-run with
+          check mode off to apply and validate for real.
+      when: ansible_check_mode
+
     - name: Fail if SSH remediation did not pass validation
       fail:
         msg: "SSH remediation failed validation. Review remediation report and backup for rollback."
-      when: not remediation_success
+      when:
+        - not ansible_check_mode
+        - not remediation_success

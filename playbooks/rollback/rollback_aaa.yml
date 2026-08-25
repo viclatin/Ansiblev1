@@ -1,0 +1,49 @@
+---
+# Reverses playbooks/remediation/remediate_aaa.yml by removing aaa new-model.
+#
+# DANGEROUS. Disabling AAA changes how the device authenticates logins. On a
+# device whose vty lines rely on AAA method lists, removing it can drop you
+# back to line passwords that may not be set, locking everyone out of a device
+# that is otherwise reachable only over the network.
+#
+# The remediation captured the full pre-change configuration to backups/, but
+# under AWX that file lives in an ephemeral execution pod and is gone once the
+# job finishes. There is therefore no stored prior state to restore, and this
+# playbook can only issue the inverse command. Make sure you have console
+# access before running it.
+- name: Roll back Cisco IOS-XE AAA change
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - aaa
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  tasks:
+    - name: Confirm the lockout risk is understood
+      ansible.builtin.assert:
+        that:
+          - rollback_confirm_disruptive | default(false) | bool
+        fail_msg: >-
+          Removing aaa new-model can lock you out of this device if the vty
+          lines have no usable fallback authentication. Confirm you have
+          console access, then re-run with rollback_confirm_disruptive=true.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Show the authentication configuration before changing it
+      cisco.ios.ios_command:
+        commands:
+          - show running-config | include ^aaa |^username |^line vty|^ login
+      register: aaa_pre_rollback
+
+    - name: Record the authentication configuration for the job log
+      ansible.builtin.debug:
+        var: aaa_pre_rollback.stdout_lines
+
+    - name: Remove aaa new-model
+      cisco.ios.ios_config:
+        lines:
+          - no aaa new-model
+        save_when: modified

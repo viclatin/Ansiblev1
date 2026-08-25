@@ -1,0 +1,55 @@
+---
+# Reverses playbooks/remediation/remediate_ssh.yml, which set
+# "transport input ssh" under line vty 0 4.
+#
+# DANGEROUS, and it cannot be done blindly. Issuing "no transport input ssh"
+# would leave the vty lines accepting nothing, locking out all remote
+# management. The remediation did not record what the transport list was
+# beforehand, so this playbook refuses to guess: you must state the value to
+# restore.
+#
+#   rollback_ssh_transport="all"        permits every transport, including telnet
+#   rollback_ssh_transport="telnet ssh" the common pre-hardening value
+#
+# Confirm against the device's own backup or console before choosing.
+- name: Roll back Cisco IOS-XE SSH transport change
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - ssh
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  tasks:
+    - name: Require an explicit transport list to restore
+      ansible.builtin.assert:
+        that:
+          - rollback_ssh_transport is defined
+          - rollback_ssh_transport | length > 0
+          - rollback_confirm_disruptive | default(false) | bool
+        fail_msg: >-
+          Set rollback_ssh_transport to the transport list to restore (for
+          example "all" or "telnet ssh") and rollback_confirm_disruptive=true.
+          Leaving the vty lines with no transport would lock out remote
+          management entirely.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Show the current vty transport configuration
+      cisco.ios.ios_command:
+        commands:
+          - show running-config | section ^line vty 0 4
+      register: vty_pre_rollback
+
+    - name: Record the vty configuration for the job log
+      ansible.builtin.debug:
+        var: vty_pre_rollback.stdout_lines
+
+    - name: Restore the requested transport list
+      cisco.ios.ios_config:
+        parents:
+          - line vty 0 4
+        lines:
+          - "transport input {{ rollback_ssh_transport }}"
+        save_when: modified
