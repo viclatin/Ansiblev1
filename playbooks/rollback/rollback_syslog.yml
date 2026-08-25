@@ -1,6 +1,8 @@
 ---
 - name: Roll back Cisco IOS-XE syslog change
-  hosts: remediation_targets
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - syslog
   gather_facts: false
   become: true
   become_method: ansible.netcommon.enable

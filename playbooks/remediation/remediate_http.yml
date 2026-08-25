@@ -1,6 +1,8 @@
 ---
 - name: Remediate HTTP Control
-  hosts: cisco
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - http
   gather_facts: false
 
   vars:
