@@ -106,13 +106,35 @@ conditional — a custom link whose text renders empty is not displayed:
 ## Using it
 
 1. Open a device whose compliance chip is amber or red.
-2. Click **Remediate**. The script form opens with the device filled in.
-3. Pick the control. **Dry run is on by default** — it launches the AWX job as
-   `job_type: check`, so `cisco.ios.ios_config` reports the change without
-   applying it.
-4. Review the AWX job linked in the script output.
-5. Re-run with dry run cleared to apply, then re-run compliance to refresh the
-   chip.
+2. Click **Remediate**. The script form opens with the device filled in and the
+   control list narrowed to what is actually failing.
+3. **Dry run is on by default.** It launches the AWX job as `job_type: check`,
+   so `cisco.ios.ios_config` reports the change without applying it, and NetBox
+   is not touched — the unchanged chip is the proof nothing happened.
+4. Clear Dry run and submit to apply.
+
+The script waits for the AWX job (jobs run 12-20s; the wait is capped at five
+minutes) and reports the outcome, so you do not have to go and look:
+
+```
+HTTP applied to Victors-Switch. Now COMPLIANT (100/100).
+```
+
+The remediation job re-assesses compliance before it finishes, so **the chip is
+already correct when the script returns** rather than waiting for the hourly
+schedule. A job that succeeds while the device stays non-compliant is reported
+as a warning naming the controls still failing, not as success.
+
+Each run also writes a journal entry on the device, so the history outlives the
+job log.
+
+### Two controls that are easy to confuse
+
+- **Dry run** decides whether the *switch* is touched.
+- The **commit** checkbox decides whether *NetBox database writes* (the journal
+  entry) persist. It is set by default because the script records every run.
+
+They are unrelated. Clearing commit does not make a run safe.
 
 ## Safety
 

@@ -52,9 +52,10 @@ CONTROL_CHOICES = (
     ("http", "HTTP - disable insecure management"),
 )
 
-# Only SYSLOG has validation and rollback playbooks; the rest apply without an
-# automated way to verify or revert. Surfaced in the UI so the engineer knows.
-CONTROLS_WITHOUT_ROLLBACK = {"aaa", "ntp", "snmp", "ssh", "http"}
+# Rolling these back is destructive in its own right - removing AAA or changing
+# the vty transport can lock out management, and re-enabling HTTP re-opens the
+# finding - so their rollback playbooks demand rollback_confirm_disruptive.
+CONTROLS_WITH_GUARDED_ROLLBACK = {"aaa", "ssh", "http"}
 
 
 def _awx_get(url, token, path):
@@ -216,10 +217,11 @@ class RemediateDevice(Script):
             f"at site '{device.site.slug}' "
             f"({'check mode' if dry_run else 'APPLYING CHANGES'})."
         )
-        if not dry_run and control in CONTROLS_WITHOUT_ROLLBACK:
+        if not dry_run and control in CONTROLS_WITH_GUARDED_ROLLBACK:
             self.log_warning(
-                f"{control.upper()} has no rollback playbook. If this change is "
-                f"wrong it must be reverted by hand."
+                f"Reverting {control.upper()} is itself disruptive, so its "
+                f"rollback requires rollback_confirm_disruptive=true on the "
+                f"Network - Rollback job template. Be sure before applying."
             )
 
         request = Request(
@@ -278,8 +280,9 @@ class RemediateDevice(Script):
             return f"Dry run complete for {control.upper()} on {device.name}."
 
         # The job re-assesses compliance and republishes before it ends, so the
-        # device record is already current by the time we get here.
-        device.refresh_from_db()
+        # record is current by now - but `cf` is a cached_property, so
+        # refresh_from_db() would not expose the new values. Re-fetch instead.
+        device = Device.objects.get(pk=device.pk)
         new_status = device.cf.get("compliance_status") or "unknown"
         new_score = device.cf.get("compliance_score")
         summary = (
