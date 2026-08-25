@@ -1,0 +1,20 @@
+---
+# Reverses playbooks/remediation/remediate_ntp.yml by removing the NTP server
+# it added. Low risk: the device falls back to its own clock.
+- name: Roll back Cisco IOS-XE NTP change
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - ntp
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  vars:
+    ntp_server: "8.8.8.8"
+
+  tasks:
+    - name: Remove the NTP server added by remediation
+      cisco.ios.ios_config:
+        lines:
+          - "no ntp server {{ ntp_server }}"
+        save_when: modified

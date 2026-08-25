@@ -1,0 +1,21 @@
+---
+# Reverses playbooks/remediation/remediate_snmp.yml by removing the community
+# string it added. The device stops answering SNMP polls for that community,
+# so monitoring will go blind for this host.
+- name: Roll back Cisco IOS-XE SNMP change
+  hosts: "{{ target_host | default('sites_' + site, true) }}"
+  tags:
+    - snmp
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  vars:
+    snmp_community: "public"
+
+  tasks:
+    - name: Remove the SNMP community added by remediation
+      cisco.ios.ios_config:
+        lines:
+          - "no snmp-server community {{ snmp_community }}"
+        save_when: modified
