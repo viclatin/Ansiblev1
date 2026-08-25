@@ -49,6 +49,20 @@ data:
     CONTROLS_WITHOUT_ROLLBACK = {"aaa", "ntp", "snmp", "ssh", "http"}
 
 
+    def failing_controls(device):
+        """Return the controls the last compliance run recorded as failing.
+
+        compliance_notes is written by playbooks/compliance.yml as either
+        "Failed controls: SYSLOG, HTTP" or "All 6 controls passing.".
+        """
+        notes = (device.cf.get("compliance_notes") or "").strip()
+        marker = "Failed controls:"
+        if not notes.startswith(marker):
+            return []
+        listed = notes[len(marker):]
+        return [c.strip().lower() for c in listed.split(",") if c.strip()]
+
+
     class RemediateDevice(Script):
         class Meta:
             name = "Remediate Device"
@@ -111,6 +125,24 @@ data:
                 "job_tags": control,
                 "job_type": "check" if dry_run else "run",
             }
+
+            failing = failing_controls(device)
+            status = device.cf.get("compliance_status")
+            if not failing:
+                self.log_warning(
+                    f"{device.name} reports compliance_status "
+                    f"'{status or 'unknown'}' with no failing controls recorded. "
+                    f"Remediating {control.upper()} may change nothing. Re-run the "
+                    f"compliance assessment if this reading looks stale "
+                    f"(last checked: {device.cf.get('compliance_checked') or 'never'})."
+                )
+            elif control not in failing:
+                self.log_warning(
+                    f"{control.upper()} is not among the failing controls on "
+                    f"{device.name}. Currently failing: "
+                    f"{', '.join(c.upper() for c in failing)}. Continuing anyway, "
+                    f"but this run will most likely change nothing."
+                )
 
             self.log_info(
                 f"Launching {control.upper()} remediation against {device.name} "
