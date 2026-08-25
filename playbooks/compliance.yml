@@ -205,17 +205,21 @@
             url: "{{ netbox_api }}/api/dcim/devices/{{ netbox_device.json.results[0].id }}/"
             method: PATCH
             body_format: json
-            body:
-              custom_fields:
-                compliance_status: "{{ netbox_status_map[compliance_status | trim] }}"
-                compliance_score: "{{ compliance_score | int }}"
-                compliance_checked: "{{ '%Y-%m-%d' | strftime }}"
-                compliance_notes: >-
-                  {{
-                    'Failed controls: ' + (failed_controls | join(', '))
-                    if failed_controls | length > 0
-                    else 'All ' ~ (total_checks | int) ~ ' controls passing.'
-                  }}
+            body: >-
+              {{
+                {
+                  'custom_fields': {
+                    'compliance_status': netbox_status_map[compliance_status | trim],
+                    'compliance_score': compliance_score | int,
+                    'compliance_checked': '%Y-%m-%d' | strftime,
+                    'compliance_notes': (
+                      'Failed controls: ' + (failed_controls | join(', '))
+                      if failed_controls | length > 0
+                      else 'All ' ~ (total_checks | int) ~ ' controls passing.'
+                    ),
+                  }
+                }
+              }}
             status_code: [200]
           when: netbox_device.json.count > 0
           changed_when: true
