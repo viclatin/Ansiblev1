@@ -9,20 +9,25 @@ NetBox prefills the form from query parameters (ScriptView.get calls
 as_form(initial=normalize_querydict(request.GET))), so the device arrives
 already selected and the engineer only confirms the control.
 
-Configuration, in NetBox's configuration.py under PLUGINS_CONFIG or as plain
-module-level settings read via settings.py:
+Configuration comes from the environment, not configuration.py: NetBox copies
+only names listed in CONFIG_PARAMS onto django settings (settings.py:234), so a
+custom AWX_URL there would never reach this script.
 
     AWX_URL              e.g. http://192.168.1.95:30765
-    AWX_TOKEN            an AWX OAuth token with permission to launch
+    AWX_TOKEN            an AWX OAuth token permitted to launch the template
     AWX_REMEDIATION_JT   the numeric job template id
+
+These are set on both the netbox and netbox-worker deployments. The worker
+matters most: NetBox runs scripts as background jobs, so this code executes
+there, not in the web pod.
 """
 
 import json
+import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from dcim.models import Device
-from django.conf import settings
 from extras.scripts import BooleanVar, ChoiceVar, ObjectVar, Script
 
 # Must match the play-level tags in playbooks/remediation/remediate_*.yml.
@@ -67,16 +72,23 @@ class RemediateDevice(Script):
 
     def run(self, data, commit):
         device = data["device"]
+        # The UI form resolves an ObjectVar to a model instance, but a run
+        # submitted through the REST API arrives as a bare pk. Accept both so
+        # the script behaves the same from the button and from automation.
+        if not isinstance(device, Device):
+            device = Device.objects.get(pk=device)
+
         control = data["control"]
         dry_run = data["dry_run"]
 
-        awx_url = getattr(settings, "AWX_URL", "").rstrip("/")
-        awx_token = getattr(settings, "AWX_TOKEN", "")
-        template_id = getattr(settings, "AWX_REMEDIATION_JT", None)
+        awx_url = os.environ.get("AWX_URL", "").rstrip("/")
+        awx_token = os.environ.get("AWX_TOKEN", "")
+        template_id = os.environ.get("AWX_REMEDIATION_JT", "")
         if not (awx_url and awx_token and template_id):
             self.log_failure(
-                "AWX_URL, AWX_TOKEN and AWX_REMEDIATION_JT must be set in "
-                "NetBox's configuration before this script can launch a job."
+                "AWX_URL, AWX_TOKEN and AWX_REMEDIATION_JT must be set in the "
+                "environment of the netbox-worker deployment before this "
+                "script can launch a job."
             )
             return "Not configured."
 
