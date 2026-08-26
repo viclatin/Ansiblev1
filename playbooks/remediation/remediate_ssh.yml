@@ -33,8 +33,8 @@
     - name: Skip unless SSH was the selected control
       ansible.builtin.meta: end_play
       when:
-        - control is defined
-        - control | lower != 'ssh'
+        - control | default('') | length > 0
+        - control | default('') | lower != 'ssh'
 
     - name: Ensure backup and report directories exist
       delegate_to: localhost
