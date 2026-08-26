@@ -15,8 +15,8 @@
     - name: Skip unless SYSLOG was the selected control
       ansible.builtin.meta: end_play
       when:
-        - control is defined
-        - control | lower != 'syslog'
+        - control | default('') | length > 0
+        - control | default('') | lower != 'syslog'
 
     - name: Configure approved syslog destination
       cisco.ios.ios_config:

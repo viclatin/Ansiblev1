@@ -187,9 +187,14 @@ class RemediateDevice(Script):
             "extra_vars": {
                 "site": device.site.slug,
                 "target_host": device.name,
+                "control": control,
+                # Always a single named device, never the whole site.
+                "confirm_site_wide": "no",
             },
-            # The control is selected by tag, never by interpolating a value
-            # into a playbook path.
+            # Sent both ways on purpose. The survey on the job template marks
+            # these required, and AWX rejects a launch that omits a required
+            # answer, so they must be present. job_tags stays as well so the
+            # selection is unambiguous however the playbook resolves it.
             "job_tags": control,
             "job_type": "check" if dry_run else "run",
         }

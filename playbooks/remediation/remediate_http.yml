@@ -33,8 +33,8 @@
     - name: Skip unless HTTP was the selected control
       ansible.builtin.meta: end_play
       when:
-        - control is defined
-        - control | lower != 'http'
+        - control | default('') | length > 0
+        - control | default('') | lower != 'http'
 
     - name: Ensure backup and report directories exist
       delegate_to: localhost
