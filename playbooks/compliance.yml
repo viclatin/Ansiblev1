@@ -14,6 +14,20 @@
     - ../group_vars/standards.yml
 
   tasks:
+    # A device whose NetBox Platform is unset has no ansible_network_os, so
+    # there is no way to connect to it. end_host drops just this device and
+    # opens no connection, leaving every other device at the site assessed.
+    - name: Note a device with no Platform set in NetBox
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} has no Platform set in NetBox, so it cannot
+          be assessed and its compliance fields will not be updated.
+      when: ansible_network_os is not defined
+
+    - name: Skip devices with no Platform set in NetBox
+      ansible.builtin.meta: end_host
+      when: ansible_network_os is not defined
+
     - name: Gather IOS facts
       cisco.ios.ios_facts:
 

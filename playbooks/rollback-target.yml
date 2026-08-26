@@ -73,23 +73,45 @@
       ansible.builtin.set_fact:
         selected_target: "{{ target_host if (target_host | default('')) | length > 0 else ('sites_' + site) }}"
 
-    - name: Confirm the target resolves to at least one host
-      ansible.builtin.assert:
-        that:
-          - (groups[selected_target] | default([selected_target])) | length > 0
-        fail_msg: "Target '{{ selected_target }}' matched no hosts in the inventory."
+    # A site can exist in NetBox before the switches that will live in it.
+    # That is not an error, so finish quietly rather than failing. The site
+    # allowlist assert above still catches a name that does not exist at all -
+    # the difference that matters is "no such site" versus "no devices yet".
+    - name: Report a site with no devices yet
+      ansible.builtin.debug:
+        msg: >-
+          No devices at '{{ selected_target }}' yet. Nothing to do - add
+          switches to this site in NetBox and they will be picked up on the
+          next run.
+      when: (groups[selected_target] | default([selected_target])) | length == 0
 
-    - name: Confirm the targeted hosts carry a network OS
-      ansible.builtin.assert:
-        that:
-          - hostvars[item].ansible_network_os is defined
-        fail_msg: >-
-          Host '{{ item }}' has no ansible_network_os. Connection settings come
-          from group_vars/platforms_<slug>.yml, keyed on the device's NetBox
-          platform slug. Check the slug with:
-          ansible-inventory -i inventories/netbox.yml --graph
-        quiet: true
-      loop: "{{ groups[selected_target] | default([selected_target]) }}"
+    - name: Finish early when there is nothing to target
+      ansible.builtin.meta: end_play
+      when: (groups[selected_target] | default([selected_target])) | length == 0
+
+    # A device whose NetBox Platform is unset has no ansible_network_os, so
+    # nothing knows how to talk to it. Report it and carry on: one incomplete
+    # device should cost one unmonitored device, not the whole site. The
+    # per-device skip happens in compliance.yml via meta: end_host.
+    - name: Find devices with no Platform set in NetBox
+      ansible.builtin.set_fact:
+        unconfigured_hosts: >-
+          {{
+            (groups[selected_target] | default([selected_target]))
+            | reject('in', hostvars | dict2items
+                     | selectattr('value.ansible_network_os', 'defined')
+                     | map(attribute='key') | list)
+            | list
+          }}
+
+    - name: Report devices that will be skipped
+      ansible.builtin.debug:
+        msg: >-
+          Skipping {{ unconfigured_hosts | join(', ') }} - no Platform set in
+          NetBox, so there is no ansible_network_os and no way to connect. Every
+          other device at this target is still assessed. Set the device's
+          Platform in NetBox to include it.
+      when: unconfigured_hosts | length > 0
 
     - name: Refuse an untagged run
       ansible.builtin.assert:
