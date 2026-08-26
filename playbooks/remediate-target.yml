@@ -34,6 +34,7 @@
         | list
       }}
     valid_site_hosts: "{{ groups['sites_' + site] | default([]) | sort }}"
+    valid_controls: [aaa, http, ntp, snmp, ssh, syslog]
 
   tasks:
     - name: Validate the selected site
@@ -100,14 +101,47 @@
           Platform in NetBox to include it.
       when: unconfigured_hosts | length > 0
 
-    - name: Refuse an untagged run
+    # A control can be chosen two ways: `control` as an extra var (what the AWX
+    # survey sets, since surveys cannot set job_tags) or a job tag (what the
+    # NetBox button sends). Exactly one control must end up selected.
+    - name: Reject an unrecognised control
       ansible.builtin.assert:
         that:
-          - ansible_run_tags | difference(['all']) | length > 0
+          - control | lower in valid_controls
         fail_msg: >-
-          No control selected. Launch with job_tags set to one of:
-          aaa, http, ntp, snmp, ssh, syslog. Running untagged would apply
-          every remediation to {{ selected_target }}.
+          '{{ control }}' is not a control. Choose one of:
+          {{ valid_controls | join(', ') }}.
+        quiet: true
+      when: control is defined and (control | length > 0)
+
+    # Previously this only checked that SOME tag was given, so a typo such as
+    # 'ntpp' passed, matched no play, and the run reported success having
+    # changed nothing.
+    - name: Refuse a run with no control selected
+      ansible.builtin.assert:
+        that:
+          - (control is defined and control | length > 0)
+            or (ansible_run_tags | difference(['all']) | intersect(valid_controls) | length > 0)
+        fail_msg: >-
+          No control selected. Set the Control survey answer, or launch with
+          job_tags set to one of: {{ valid_controls | join(', ') }}. Running
+          with none selected would apply every remediation to
+          {{ selected_target }}.
+
+    # An empty device box means every switch at the site, which is also what a
+    # field left untouched looks like. Make the wide blast radius deliberate.
+    - name: Require confirmation for a site-wide run
+      ansible.builtin.assert:
+        that:
+          - confirm_site_wide | default('no') | lower in ['yes', 'true']
+        fail_msg: >-
+          This would apply {{ (control | default('the selected control')) | upper }}
+          to every switch at '{{ site }}'
+          ({{ (groups[selected_target] | default([])) | join(', ') }}).
+          Name a single device, or set 'Apply to every switch at this site' to
+          yes.
+        quiet: true
+      when: (target_host | default('')) | length == 0
 
     - name: Show the resolved target
       ansible.builtin.debug:

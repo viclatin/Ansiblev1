@@ -8,6 +8,16 @@
   become_method: ansible.netcommon.enable
 
   tasks:
+    # An AWX survey can only set extra variables, never job_tags, so the
+    # control is selectable by variable as well as by tag. When `control` is
+    # undefined this does nothing and tag selection behaves exactly as before,
+    # which is what the NetBox Remediate button relies on.
+    - name: Skip unless SYSLOG was the selected control
+      ansible.builtin.meta: end_play
+      when:
+        - control is defined
+        - control | lower != 'syslog'
+
     - name: Configure approved syslog destination
       cisco.ios.ios_config:
         lines:
