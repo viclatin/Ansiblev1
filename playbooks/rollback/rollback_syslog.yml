@@ -8,6 +8,15 @@
   become_method: ansible.netcommon.enable
 
   tasks:
+    # An AWX survey can only set extra variables, never job_tags, so the
+    # control is selectable by variable as well as by tag. Empty and undefined
+    # both mean "not specified", so tag-driven runs are unaffected.
+    - name: Skip unless SYSLOG was the selected control
+      ansible.builtin.meta: end_play
+      when:
+        - control | default('') | length > 0
+        - control | default('') | lower != 'syslog'
+
     - name: Remove the approved syslog destination
       cisco.ios.ios_config:
         lines:

@@ -14,6 +14,15 @@
     snmp_community: "public"
 
   tasks:
+    # An AWX survey can only set extra variables, never job_tags, so the
+    # control is selectable by variable as well as by tag. Empty and undefined
+    # both mean "not specified", so tag-driven runs are unaffected.
+    - name: Skip unless SNMP was the selected control
+      ansible.builtin.meta: end_play
+      when:
+        - control | default('') | length > 0
+        - control | default('') | lower != 'snmp'
+
     - name: Remove the SNMP community added by remediation
       cisco.ios.ios_config:
         lines:
