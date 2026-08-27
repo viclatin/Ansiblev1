@@ -13,6 +13,15 @@
     ntp_server: "8.8.8.8"
 
   tasks:
+    # An AWX survey can only set extra variables, never job_tags, so the
+    # control is selectable by variable as well as by tag. Empty and undefined
+    # both mean "not specified", so tag-driven runs are unaffected.
+    - name: Skip unless NTP was the selected control
+      ansible.builtin.meta: end_play
+      when:
+        - control | default('') | length > 0
+        - control | default('') | lower != 'ntp'
+
     - name: Remove the NTP server added by remediation
       cisco.ios.ios_config:
         lines:
