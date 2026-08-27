@@ -136,6 +136,32 @@ job log.
 
 They are unrelated. Clearing commit does not make a run safe.
 
+## Rolling a change back
+
+Rollback is **AWX only** — deliberately not on the device page. Reverting is an
+uncommon, higher-consequence act that benefits from AWX's prompts and job
+history, and putting it one click from a device would invite the accident the
+confirmations exist to prevent.
+
+Launch **Network - Rollback**. It mirrors the remediation template: Job Type
+defaults to Check, and the survey asks for Site, Control, an optional Device
+(blank = the whole site), and a site-wide confirmation. Two extra answers cover
+the rollbacks that are themselves disruptive:
+
+| Answer | Needed by | Why |
+| --- | --- | --- |
+| `rollback_confirm_disruptive` | aaa, ssh, http | Removing AAA or changing the vty transport can lock out management; re-enabling HTTP re-opens the finding |
+| `rollback_ssh_transport` | ssh only | The remediation never recorded the previous transport list, so it must be stated rather than guessed |
+
+An unrecognised control is refused twice over: AWX rejects a value outside the
+survey choices at launch, and the playbook asserts against the same list for
+runs that come in another way.
+
+**Rollback reverses the commands a remediation applied; it does not restore a
+saved configuration.** The remediations do capture the running config first, but
+under AWX that file lives in an execution pod and is discarded when the job
+ends. That is why the SSH transport has to be supplied by hand.
+
 ## Safety
 
 - **An untagged run is refused.** Without a control tag the wrapper would apply
