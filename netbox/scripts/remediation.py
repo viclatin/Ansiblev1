@@ -184,6 +184,11 @@ class RemediateDevice(Script):
             return "Device has no site."
 
         payload = {
+            # These are survey answers on the job template. AWX rejects a
+            # launch that omits a required one, so all four are always sent.
+            # The control is chosen by this variable rather than by job_tags:
+            # the template no longer prompts for tags, so a tag sent here would
+            # be silently discarded.
             "extra_vars": {
                 "site": device.site.slug,
                 "target_host": device.name,
@@ -191,11 +196,6 @@ class RemediateDevice(Script):
                 # Always a single named device, never the whole site.
                 "confirm_site_wide": "no",
             },
-            # Sent both ways on purpose. The survey on the job template marks
-            # these required, and AWX rejects a launch that omits a required
-            # answer, so they must be present. job_tags stays as well so the
-            # selection is unambiguous however the playbook resolves it.
-            "job_tags": control,
             "job_type": "check" if dry_run else "run",
         }
 
