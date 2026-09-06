@@ -9,5 +9,19 @@
 # and rename this file if the generated group is not platforms_ios.
 # playbooks/site-device-target.yml asserts ansible_network_os is set, so a
 # mismatch fails loudly rather than silently skipping hosts.
+#
+# IMPORTANT - these vars only reach a play if this directory is adjacent to the
+# playbook file that DEFINES that play. Ansible resolves playbook group_vars
+# per imported playbook, not from the entry playbook, so a play in a
+# subdirectory sees playbooks/<subdir>/group_vars and nothing else. Every
+# subdirectory under playbooks/ therefore carries a `group_vars` symlink back
+# to this file, exactly as playbooks/group_vars itself does.
+#
+# Without that link the connection settings below are silently absent, the host
+# falls back to ansible_connection: ssh, and every cisco.ios module fails with
+# "Connection type ssh is not valid for this module". The guard in
+# remediate-target.yml does not catch it: that assert runs in a localhost play
+# living in playbooks/, where these vars DO resolve. A new playbook
+# subdirectory needs the same two symlinks.
 ansible_connection: network_cli
 ansible_network_os: cisco.ios.ios

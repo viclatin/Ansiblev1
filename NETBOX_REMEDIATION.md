@@ -182,3 +182,28 @@ ends. That is why the SSH transport has to be supplied by hand.
   bypass the change-manifest governance in this repository — `test_required`,
   `production_approval_required`, `production_target_allowlist` and the GitHub
   Actions promotion flow.
+
+## Troubleshooting
+
+### `Connection type ssh is not valid for this module`
+
+Every `cisco.ios` task fails at "Gather IOS facts", the switch is never
+touched, and the compliance check keeps reporting the same failure — while the
+compliance job against the same device succeeds.
+
+The connection settings live in `group_vars/platforms_ios.yml`, keyed on the
+`platforms_ios` group. Ansible resolves playbook-adjacent `group_vars` **per
+imported playbook**, not from the entry playbook, so a play defined in
+`playbooks/remediation/` looks in `playbooks/remediation/group_vars` and
+nowhere else. Compliance is unaffected because its plays live in `playbooks/`,
+next to the `group_vars` symlink.
+
+Each subdirectory under `playbooks/` therefore carries `group_vars` and
+`host_vars` symlinks back to the repository root, mirroring
+`playbooks/group_vars`. **A new playbook subdirectory needs the same two
+links**, or its plays will silently fall back to `ansible_connection: ssh`.
+
+The site/host guard in `remediate-target.yml` does not catch this. That assert
+runs in a `localhost` play that lives in `playbooks/`, where the variables do
+resolve — so the run is validated as healthy and then fails on the first task
+that actually talks to the device.
