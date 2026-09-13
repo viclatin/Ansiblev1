@@ -51,6 +51,40 @@
     - name: Gather IOS facts
       cisco.ios.ios_facts:
 
+    # Zero-day provisioning configures Layer 2 access switches: VLANs, VTP and
+    # switchport trunks. A router such as a Catalyst 8000v rejects `vlan <n>`
+    # and `switchport` part-way through a run, leaving partial unsaved config
+    # behind, so confirm the device has switchports before anything is pushed.
+    #
+    # `show vlan brief` is NOT a usable test: a Catalyst 8000v accepts it and
+    # lists VLAN 1. `show interfaces switchport` is: it returns nothing on that
+    # router, and lists "Switchport: Enabled" ports on an access switch. The
+    # check is a plain substring match. Platforms that reject the command
+    # outright raise a module exception that failed_when cannot catch, hence
+    # block/rescue.
+    - name: Confirm the device is a Layer 2 switch
+      block:
+        - name: Read the switchport capability
+          cisco.ios.ios_command:
+            commands:
+              - show interfaces switchport
+          register: zeroday_switchport
+
+        - name: Require at least one Layer 2 switchport
+          ansible.builtin.assert:
+            that:
+              - "'Switchport: Enabled' in zeroday_switchport.stdout[0]"
+            quiet: true
+      rescue:
+        - name: Refuse a device without Layer 2 switchports
+          ansible.builtin.fail:
+            msg: >-
+              {{ zeroday_hostname }} is a {{ ansible_net_model | default('device of unknown model') }}
+              with no Layer 2 switchports ('show interfaces switchport' was
+              rejected or listed none). Zero-day provisioning configures access
+              switches - VLANs, VTP and switchport trunks - and cannot run on a
+              router. Nothing was changed on the device.
+
     - name: Capture the pre-provisioning state
       cisco.ios.ios_command:
         commands:

@@ -38,7 +38,13 @@ the run before any configuration is pushed.
 
 ## What it configures
 
-In this order:
+Before any change, it confirms the device is a Layer 2 switch:
+`show interfaces switchport` must list at least one `Switchport: Enabled` port.
+A router such as a Catalyst 8000v returns nothing there, so it is refused with a
+message naming its model, and nothing is pushed. (`show vlan brief` is not used:
+the Catalyst 8000v accepts it and lists VLAN 1 despite rejecting `vlan <n>`.)
+
+Then, in this order:
 
 1. **Organisational baseline** — not survey fields. Deliberately identical to
    what `group_vars/standards.yml` scores, so a freshly provisioned switch
@@ -157,6 +163,8 @@ from an AWX custom credential type — without editing the file.
 ## Safety and guards
 
 - Every survey answer is required and format-checked before NetBox is queried.
+- The device must have Layer 2 switchports; a router is refused before any
+  configuration is pushed.
 - The device must exist in NetBox exactly once, and carry at least one TRUNK
   uplink.
 - The temporary address is never removed, and the run refuses if configuring
