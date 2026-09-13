@@ -27,9 +27,10 @@ zeroday_trunk_description: Uplink-trunk-link
 
 zeroday_mgmt_vlan_name: MANAGEMENT
 
-# NetBox device statuses offered in the survey's hostname dropdown.
+# NetBox device statuses offered in the survey's hostname dropdown. Staged
+# only: a Planned switch is not racked or reachable yet, and an Active one is
+# in production and must never be re-provisioned by mistake.
 zeroday_candidate_statuses:
-  - planned
   - staged
 
 zeroday_vtp_modes:

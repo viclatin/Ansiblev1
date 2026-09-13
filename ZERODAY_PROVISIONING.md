@@ -28,7 +28,7 @@ with the bootstrap credential.
 In NetBox, the engineer must have:
 
 1. Created the device with the correct device type, the hostname, and the
-   serial number, and set its **status to Planned or Staged** so it appears in
+   serial number, and set its **status to Staged** so it appears in
    the survey dropdown.
 2. Tagged every uplink interface with the tag **TRUNK**. The API filters on the
    tag's *slug*, which is `trunk` — that is what `zeroday_trunk_tag` holds.
@@ -124,7 +124,7 @@ names the offending field when one is wrong.
 | Schedule | Every 15–30 minutes |
 
 It lists NetBox devices whose status is in `zeroday_candidate_statuses`
-(Planned, Staged) and rewrites only the `zeroday_hostname` question's choices.
+(Staged only) and rewrites only the `zeroday_hostname` question's choices.
 It never blanks the dropdown, refuses to run without an explicit template id,
 and supports check mode. It is separate from `sync_survey_choices.yml` because
 that one reads the AWX inventory, where a zero-day switch never appears — it has
