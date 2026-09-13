@@ -131,6 +131,14 @@ names the offending field when one is wrong.
 | Extra vars | `zeroday_job_template_id: <id of the template above>` |
 | Schedule | Every 15–30 minutes |
 
+**Grant the sync's AWX user Admin on the provisioning template.** The
+"AWX Self (survey sync)" credential authenticates as `awx-survey-sync`, which is
+deliberately not a superuser. AWX only lets a user read or edit a survey with the
+Admin role on that template, so without it the sync fails at "Read the current
+survey specification" with HTTP 403. Grant it under the provisioning template's
+Access tab — the same role that user already holds on the compliance,
+remediation and rollback templates.
+
 It lists NetBox devices whose status is in `zeroday_candidate_statuses`
 (Staged only) and rewrites only the `zeroday_hostname` question's choices.
 It never blanks the dropdown, refuses to run without an explicit template id,
