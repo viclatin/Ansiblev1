@@ -1,0 +1,258 @@
+---
+# Zero-day provisioning - device play. Imported by playbooks/provision-zeroday.yml,
+# which validates the survey, resolves NetBox and add_host's the switch into
+# zeroday_targets at its temporary address. Not meant to be run on its own.
+#
+# Order matters: organisational standards first, then survey-driven values,
+# then the uplinks. Configuration is saved once, at the end.
+#
+# This directory carries group_vars/host_vars symlinks like every other
+# playbooks/ subdirectory (see group_vars/platforms_ios.yml). The connection
+# settings used here are set on add_host and do not depend on them, but a new
+# subdirectory without the links is the bug fixed in a0271a0.
+- name: Provision the zero-day access switch baseline
+  hosts: zeroday_targets
+  gather_facts: false
+  become: true
+  become_method: ansible.netcommon.enable
+
+  vars_files:
+    - ../../group_vars/zeroday_baseline.yml
+
+  vars:
+    zeroday_backups_dir: "{{ playbook_dir }}/../../backups/zeroday"
+    zeroday_reports_dir: "{{ playbook_dir }}/../../reports/zeroday"
+    zeroday_mgmt_address: "{{ zeroday_mgmt_ip | split('/') | first }}"
+    zeroday_mgmt_prefix: "{{ zeroday_mgmt_ip | split('/') | last | int }}"
+    # Prefix length to dotted netmask without ansible.utils, which is not in
+    # requirements.yml: the mask is 2^32 - 2^(32 - prefix), split into octets.
+    zeroday_mgmt_mask_int: "{{ 4294967296 - 2 ** (32 - (zeroday_mgmt_prefix | int)) }}"
+    zeroday_mgmt_netmask: >-
+      {{
+        [
+          (zeroday_mgmt_mask_int | int) // 16777216 % 256,
+          (zeroday_mgmt_mask_int | int) // 65536 % 256,
+          (zeroday_mgmt_mask_int | int) // 256 % 256,
+          (zeroday_mgmt_mask_int | int) % 256
+        ] | join('.')
+      }}
+
+  tasks:
+    - name: Ensure zero-day backup and report directories exist
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ zeroday_backups_dir }}"
+        - "{{ zeroday_reports_dir }}"
+
+    - name: Gather IOS facts
+      cisco.ios.ios_facts:
+
+    - name: Capture the pre-provisioning state
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+          - show ip interface brief
+      register: zeroday_pre
+
+    - name: Build the provisioning timestamp
+      ansible.builtin.set_fact:
+        zeroday_run_ts: "{{ lookup('ansible.builtin.pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Save the pre-provisioning backup
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ zeroday_pre.stdout[0] }}"
+        dest: "{{ zeroday_backups_dir }}/{{ zeroday_hostname }}_zeroday_pre_{{ zeroday_run_ts }}.cfg"
+        mode: "0600"
+
+    # The temporary address stays in place so this session survives. If it
+    # already lives on the management SVI, configuring the final address would
+    # replace it and cut the connection mid-run, so refuse before any change.
+    - name: Refuse when the temporary address is on the management SVI
+      ansible.builtin.assert:
+        that:
+          - not (zeroday_pre.stdout[1] is regex('^Vlan' ~ zeroday_mgmt_vlan ~ '\s+' ~ (zeroday_temp_ip | regex_escape) ~ '\s', multiline=True))
+        fail_msg: >-
+          The temporary address {{ zeroday_temp_ip }} is already configured on
+          Vlan{{ zeroday_mgmt_vlan }}, the management SVI. Setting the final
+          address there would replace it and drop this session. Stage the
+          switch with its temporary address on a different VLAN.
+        quiet: true
+
+    - name: Apply the organisational baseline
+      cisco.ios.ios_config:
+        save_when: never
+        lines: "{{ ['hostname ' ~ zeroday_hostname] + zeroday_baseline_commands }}"
+
+    - name: Restrict VTY access to SSH
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - line vty 0 4
+        lines:
+          - transport input ssh
+
+    - name: Apply VTP settings
+      cisco.ios.ios_config:
+        save_when: never
+        lines:
+          - "vtp domain {{ zeroday_vtp_domain }}"
+          - "vtp mode {{ zeroday_vtp_mode }}"
+          - "vtp password {{ zeroday_vtp_password }}"
+      no_log: true
+
+    # IOS rejects `vlan <n>` in VTP client mode. There the management VLAN must
+    # be served by the VTP server; the SVI is still configured locally.
+    - name: Create the management VLAN
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "vlan {{ zeroday_mgmt_vlan }}"
+        lines:
+          - "name {{ zeroday_mgmt_vlan_name }}"
+      when: zeroday_vtp_mode != 'client'
+
+    - name: Note that the management VLAN must come from the VTP server
+      ansible.builtin.debug:
+        msg: >-
+          VTP mode is client, so VLAN {{ zeroday_mgmt_vlan }} was not created
+          locally - IOS does not allow it. It must exist on the VTP server for
+          Vlan{{ zeroday_mgmt_vlan }} to come up.
+      when: zeroday_vtp_mode == 'client'
+
+    - name: Configure the management SVI
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "interface Vlan{{ zeroday_mgmt_vlan }}"
+        lines:
+          - "ip address {{ zeroday_mgmt_address }} {{ zeroday_mgmt_netmask }}"
+          - no shutdown
+
+    - name: Set the default gateway
+      cisco.ios.ios_config:
+        save_when: never
+        lines:
+          - "ip default-gateway {{ zeroday_gateway }}"
+
+    # Platforms that only support 802.1Q reject this command outright, which
+    # is harmless, so a rejection does not fail the run.
+    - name: Set 802.1Q trunk encapsulation where the platform requires it
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "interface {{ item }}"
+        lines:
+          - switchport trunk encapsulation dot1q
+      loop: "{{ zeroday_trunk_interfaces }}"
+      register: zeroday_encapsulation
+      failed_when: false
+
+    - name: Configure the NetBox-tagged uplinks as trunks
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "interface {{ item }}"
+        lines:
+          - "description {{ zeroday_trunk_description }}"
+          - switchport mode trunk
+          - no shutdown
+      loop: "{{ zeroday_trunk_interfaces }}"
+
+    - name: Save the configuration
+      cisco.ios.ios_config:
+        save_when: modified
+
+    - name: Capture the post-provisioning state
+      cisco.ios.ios_command:
+        commands:
+          - show running-config
+          - show vtp status
+      register: zeroday_post
+
+    - name: Evaluate the provisioned configuration
+      ansible.builtin.set_fact:
+        zeroday_checks:
+          hostname: "{{ zeroday_post.stdout[0] is regex('^hostname ' ~ (zeroday_hostname | regex_escape) ~ '$', multiline=True) }}"
+          ntp: "{{ zeroday_post.stdout[0] is regex('^ntp server ' ~ (zeroday_ntp_server | regex_escape) ~ '$', multiline=True) }}"
+          snmp: "{{ zeroday_post.stdout[0] is regex('^snmp-server community ' ~ (zeroday_snmp_community | regex_escape) ~ ' ' ~ zeroday_snmp_access, multiline=True) }}"
+          syslog: "{{ zeroday_post.stdout[0] is regex('^logging host ' ~ (zeroday_syslog_host | regex_escape) ~ '$', multiline=True) }}"
+          aaa: "{{ zeroday_post.stdout[0] is regex('^aaa new-model$', multiline=True) }}"
+          http_disabled: "{{ not (zeroday_post.stdout[0] is regex('^ip http server$', multiline=True)) }}"
+          ssh_only_vty: "{{ zeroday_post.stdout[0] is regex('^line vty 0 4\\n(?: [^\\n]*\\n)*? transport input ssh$', multiline=True) }}"
+          vtp_domain: "{{ zeroday_post.stdout[1] is regex('VTP Domain Name\\s*:\\s*' ~ (zeroday_vtp_domain | regex_escape) ~ '\\s*$', multiline=True) }}"
+          vtp_mode: "{{ zeroday_post.stdout[1] is regex('VTP Operating Mode\\s*:\\s*' ~ zeroday_vtp_mode, multiline=True, ignorecase=True) }}"
+          mgmt_svi: >-
+            {{ zeroday_post.stdout[0] is regex('^interface Vlan' ~ zeroday_mgmt_vlan ~ '\n(?: [^\n]*\n)*? ip address '
+            ~ (zeroday_mgmt_address | regex_escape) ~ ' ' ~ (zeroday_mgmt_netmask | regex_escape) ~ '$', multiline=True) }}
+          default_gateway: "{{ zeroday_post.stdout[0] is regex('^ip default-gateway ' ~ (zeroday_gateway | regex_escape) ~ '$', multiline=True) }}"
+
+    - name: Evaluate each uplink
+      ansible.builtin.set_fact:
+        zeroday_checks: >-
+          {{
+            zeroday_checks | combine({
+              'trunk ' ~ item:
+                (zeroday_post.stdout[0] is regex('^interface ' ~ (item | regex_escape) ~ '\n(?: [^\n]*\n)*? switchport mode trunk$', multiline=True))
+                and
+                (zeroday_post.stdout[0] is regex('^interface ' ~ (item | regex_escape) ~ '\n(?: [^\n]*\n)*? description ' ~ (zeroday_trunk_description | regex_escape) ~ '$', multiline=True))
+            })
+          }}
+      loop: "{{ zeroday_trunk_interfaces }}"
+
+    - name: Collect failed checks
+      ansible.builtin.set_fact:
+        zeroday_failed_checks: "{{ zeroday_checks | dict2items | rejectattr('value') | map(attribute='key') | list }}"
+
+    # The VTP password is deliberately neither verified nor recorded.
+    - name: Build the provisioning report
+      ansible.builtin.set_fact:
+        zeroday_report:
+          hostname: "{{ zeroday_hostname }}"
+          netbox_device_id: "{{ zeroday_netbox_device_id }}"
+          timestamp: "{{ lookup('ansible.builtin.pipe', 'date -Iseconds') }}"
+          check_mode: "{{ ansible_check_mode }}"
+          temporary_ip: "{{ zeroday_temp_ip }}"
+          management_vlan: "{{ zeroday_mgmt_vlan }}"
+          management_ip: "{{ zeroday_mgmt_ip }}"
+          default_gateway: "{{ zeroday_gateway }}"
+          vtp_mode: "{{ zeroday_vtp_mode }}"
+          vtp_domain: "{{ zeroday_vtp_domain }}"
+          trunk_interfaces: "{{ zeroday_trunk_interfaces }}"
+          backup_file: "{{ zeroday_hostname }}_zeroday_pre_{{ zeroday_run_ts }}.cfg"
+          checks: "{{ zeroday_checks }}"
+          failed_checks: "{{ zeroday_failed_checks }}"
+          status: "{{ 'PASS' if zeroday_failed_checks | length == 0 else 'FAIL' }}"
+
+    - name: Write the provisioning report
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ zeroday_report | to_nice_json }}"
+        dest: "{{ zeroday_reports_dir }}/{{ zeroday_hostname }}_zeroday.json"
+        mode: "0644"
+
+    - name: Show the verification result
+      ansible.builtin.debug:
+        msg: "{{ zeroday_report.checks }}"
+
+    - name: Report that verification is not meaningful in check mode
+      ansible.builtin.debug:
+        msg: >-
+          Check mode: nothing was applied, so the checks above describe the
+          switch as it stands, not the outcome. Re-run with check mode off to
+          provision and verify for real.
+      when: ansible_check_mode
+
+    - name: Fail when provisioning did not verify
+      ansible.builtin.fail:
+        msg: >-
+          Zero-day provisioning of {{ zeroday_hostname }} failed verification:
+          {{ zeroday_failed_checks | join(', ') }}. The pre-provisioning
+          backup is {{ zeroday_report.backup_file }}.
+      when:
+        - not ansible_check_mode
+        - zeroday_failed_checks | length > 0

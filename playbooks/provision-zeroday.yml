@@ -1,0 +1,165 @@
+---
+# Zero-day access switch provisioning - entry point for the AWX job template
+# "Network - Zero-Day Provisioning".
+#
+# Deliberately separate from the compliance/remediation workflow: its own
+# survey, its own zeroday_* variables, its own vars file
+# (group_vars/zeroday_baseline.yml) and its own output folders
+# (backups/zeroday, reports/zeroday). See ZERODAY_PROVISIONING.md.
+#
+# A zero-day switch has no primary IP in NetBox, so nb_inventory never emits it
+# and it cannot be targeted through the AWX inventory. This play validates the
+# survey, resolves the device and its TRUNK-tagged uplinks in NetBox, then
+# registers the switch at its temporary address with add_host.
+- name: Validate the zero-day survey and resolve the switch in NetBox
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars_files:
+    - ../group_vars/zeroday_baseline.yml
+
+  vars:
+    netbox_api: "{{ lookup('ansible.builtin.env', 'NETBOX_API') | regex_replace('/$', '') }}"
+    netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+    zeroday_ipv4_regex: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'
+    zeroday_required_answers:
+      - zeroday_hostname
+      - zeroday_temp_ip
+      - zeroday_mgmt_vlan
+      - zeroday_mgmt_ip
+      - zeroday_gateway
+      - zeroday_vtp_mode
+      - zeroday_vtp_domain
+      - zeroday_vtp_password
+
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "Token {{ netbox_token }}"
+        Content-Type: application/json
+      validate_certs: false
+
+  tasks:
+    - name: Verify the NetBox credential was injected
+      ansible.builtin.assert:
+        that:
+          - netbox_api | length > 0
+          - netbox_token | length > 0
+        fail_msg: >-
+          NETBOX_API/NETBOX_TOKEN are unset. Attach the NetBox API credential
+          to this job template.
+        quiet: true
+
+    # Only the variable name is ever printed, never its value, so the VTP
+    # password cannot reach the job log through this check.
+    - name: Require every survey answer
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.vars', item, default='') | string | length > 0
+        fail_msg: "Survey answer '{{ item }}' is missing. Every zero-day survey field is required."
+        quiet: true
+      loop: "{{ zeroday_required_answers }}"
+
+    - name: Validate the format of the survey answers
+      ansible.builtin.assert:
+        that:
+          - zeroday_temp_ip is match(zeroday_ipv4_regex)
+          - zeroday_gateway is match(zeroday_ipv4_regex)
+          - zeroday_mgmt_ip | split('/') | length == 2
+          - zeroday_mgmt_ip | split('/') | first is match(zeroday_ipv4_regex)
+          - zeroday_mgmt_ip | split('/') | last is match('^([1-9]|[12][0-9]|3[0-2])$')
+          - zeroday_mgmt_ip | split('/') | first != zeroday_temp_ip
+          - zeroday_mgmt_vlan | string is match('^[0-9]+$')
+          - zeroday_mgmt_vlan | int >= 1
+          - zeroday_mgmt_vlan | int <= 4094
+          - zeroday_mgmt_vlan | int not in [1002, 1003, 1004, 1005]
+          - zeroday_vtp_mode in zeroday_vtp_modes
+        fail_msg: >-
+          Invalid survey answer. Expected: temporary IP and gateway as dotted
+          IPv4 (e.g. 192.168.1.50); final management IP in CIDR form
+          (e.g. 10.10.20.5/24) and different from the temporary IP; management
+          VLAN 1-4094 excluding the reserved 1002-1005; VTP mode one of
+          {{ zeroday_vtp_modes | join(', ') }}. Received temp_ip={{ zeroday_temp_ip }},
+          mgmt_ip={{ zeroday_mgmt_ip }}, gateway={{ zeroday_gateway }},
+          mgmt_vlan={{ zeroday_mgmt_vlan }}, vtp_mode={{ zeroday_vtp_mode }}.
+        quiet: true
+
+    - name: Find the pre-staged device in NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_api }}/api/dcim/devices/?name={{ zeroday_hostname | urlencode }}"
+        method: GET
+        status_code: [200]
+      register: zeroday_nb_device
+      check_mode: false
+      no_log: true
+
+    # Unlike compliance.yml, which warns and skips an absent device, a switch
+    # that was never pre-staged is an error: there is nothing to provision it
+    # against.
+    - name: Require exactly one NetBox device with that hostname
+      ansible.builtin.assert:
+        that:
+          - zeroday_nb_device.json.count == 1
+        fail_msg: >-
+          Expected exactly one NetBox device named '{{ zeroday_hostname }}',
+          found {{ zeroday_nb_device.json.count }}. Pre-stage the device in
+          NetBox (device type, hostname, serial) before provisioning.
+        quiet: true
+
+    - name: Fetch the device's uplink interfaces from NetBox
+      ansible.builtin.uri:
+        url: >-
+          {{ netbox_api }}/api/dcim/interfaces/?device_id={{ zeroday_nb_device.json.results[0].id }}&tag={{ zeroday_trunk_tag | urlencode }}&limit=0
+        method: GET
+        status_code: [200]
+      register: zeroday_nb_trunks
+      check_mode: false
+      no_log: true
+
+    - name: Collect the uplink interface names
+      ansible.builtin.set_fact:
+        zeroday_netbox_device_id: "{{ zeroday_nb_device.json.results[0].id }}"
+        zeroday_trunk_interfaces: "{{ zeroday_nb_trunks.json.results | map(attribute='name') | list }}"
+
+    - name: Require at least one uplink tagged in NetBox
+      ansible.builtin.assert:
+        that:
+          - zeroday_trunk_interfaces | length > 0
+        fail_msg: >-
+          No interface on '{{ zeroday_hostname }}' carries the NetBox tag with
+          slug '{{ zeroday_trunk_tag }}' (display name TRUNK). Tag the uplink
+          interface(s) in NetBox before provisioning.
+        quiet: true
+
+    - name: Show what will be provisioned
+      ansible.builtin.debug:
+        msg:
+          - "Switch          : {{ zeroday_hostname }} (NetBox device {{ zeroday_netbox_device_id }})"
+          - "Connect via     : {{ zeroday_temp_ip }} (temporary, left in place)"
+          - "Management      : Vlan{{ zeroday_mgmt_vlan }} {{ zeroday_mgmt_ip }}, gateway {{ zeroday_gateway }}"
+          - "VTP             : mode {{ zeroday_vtp_mode }}, domain {{ zeroday_vtp_domain }}"
+          - "Trunk uplinks   : {{ zeroday_trunk_interfaces | join(', ') }}"
+
+    # Connection settings are set directly on the host rather than inherited
+    # from group_vars/platforms_ios.yml: a host added at run time does not
+    # reliably pick up playbook-adjacent group_vars. Host key checking is off
+    # because every switch is brand new and temporary addresses are reused.
+    - name: Register the switch at its temporary address
+      ansible.builtin.add_host:
+        name: "{{ zeroday_hostname }}"
+        groups: zeroday_targets
+        ansible_host: "{{ zeroday_temp_ip }}"
+        ansible_connection: network_cli
+        ansible_network_os: cisco.ios.ios
+        ansible_user: "{{ zeroday_bootstrap_user }}"
+        ansible_password: "{{ zeroday_bootstrap_password }}"
+        ansible_become_password: "{{ zeroday_bootstrap_password }}"
+        ansible_host_key_checking: false
+        zeroday_netbox_device_id: "{{ zeroday_netbox_device_id }}"
+        zeroday_trunk_interfaces: "{{ zeroday_trunk_interfaces }}"
+      changed_when: false
+      no_log: true
+
+- name: Apply the zero-day baseline
+  import_playbook: provisioning/zeroday_baseline.yml

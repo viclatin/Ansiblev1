@@ -1,0 +1,54 @@
+---
+# Zero-day access switch provisioning standards.
+#
+# Loaded explicitly with vars_files by playbooks/provision-zeroday.yml,
+# playbooks/provisioning/zeroday_baseline.yml and
+# playbooks/sync_zeroday_survey.yml. It is not named after an inventory group,
+# and nothing in the compliance or remediation workflows reads it. Every
+# variable is prefixed zeroday_ so the two workflows cannot collide.
+#
+# The baseline values deliberately match group_vars/standards.yml and the
+# remediation playbooks, so a freshly provisioned switch scores 100 on its
+# first compliance run. Change them together.
+#
+# 802.1x, TACACS, password policy and banner are intentionally absent for now.
+
+# Bootstrap credential - the local admin every freshly staged switch ships
+# with. Override at launch with extra vars of the same name, which take
+# precedence over this file.
+# WARNING: this is a working credential committed to git.
+zeroday_bootstrap_user: admin
+zeroday_bootstrap_password: admin
+
+# NetBox tag SLUG marking uplink interfaces. The tag's display name is "TRUNK";
+# the API filters on the slug, which is "trunk".
+zeroday_trunk_tag: trunk
+zeroday_trunk_description: Uplink-trunk-link
+
+zeroday_mgmt_vlan_name: MANAGEMENT
+
+# NetBox device statuses offered in the survey's hostname dropdown.
+zeroday_candidate_statuses:
+  - planned
+  - staged
+
+zeroday_vtp_modes:
+  - client
+  - server
+  - transparent
+
+zeroday_ntp_server: "8.8.8.8"
+zeroday_snmp_community: victor
+zeroday_snmp_access: RO
+zeroday_syslog_host: "2.2.2.2"
+
+# Global organisational baseline, pushed before any survey-driven value.
+# `no logging trap` from remediate_syslog.yml is left out: it never appears in
+# running-config, so it would report a change on every run.
+zeroday_baseline_commands:
+  - "ntp server {{ zeroday_ntp_server }}"
+  - "snmp-server community {{ zeroday_snmp_community }} {{ zeroday_snmp_access }}"
+  - logging trap warnings
+  - "logging host {{ zeroday_syslog_host }}"
+  - aaa new-model
+  - no ip http server
