@@ -46,17 +46,18 @@ In this order:
    `hostname`, `ntp server 8.8.8.8`, `snmp-server community victor RO`,
    `logging trap warnings`, `logging host 2.2.2.2`, `aaa new-model`,
    `no ip http server`, and `transport input ssh` on `line vty 0 4`.
-2. **VTP** — domain, mode and password from the survey.
-3. **Management VLAN and SVI** — the VLAN (see the VTP note below), then
-   `interface Vlan<n>` with the final address and `no shutdown`, then
-   `ip default-gateway`.
-4. **Uplinks** — every TRUNK-tagged interface gets
+2. **Management VLAN** — created before any VTP command, in every VTP mode
+   (see below).
+3. **VTP** — domain, mode and password from the survey.
+4. **Management SVI** — `interface Vlan<n>` with the final address and
+   `no shutdown`, then `ip default-gateway`.
+5. **Uplinks** — every TRUNK-tagged interface gets
    `description Uplink-trunk-link`, `switchport mode trunk` and `no shutdown`.
    `switchport trunk encapsulation dot1q` is attempted first and tolerated
    where the platform rejects it.
-5. **Save** — once, at the end, and only if the running config changed.
+6. **Save** — once, at the end, and only if the running config changed.
 
-It then re-reads `show running-config` and `show vtp status`, checks every item
+It then re-reads `show running-config`, `show vtp status` and `show vlan id <n>`, checks every item
 above, writes `reports/zeroday/<hostname>_zeroday.json`, and fails the job if
 any check did not pass.
 
@@ -75,10 +76,17 @@ final address there would replace it and cut the session. The play checks
 
 ### VTP client mode and the management VLAN
 
-IOS rejects `vlan <n>` while in VTP client mode. When the survey selects
-**client**, the play does not create the management VLAN locally and says so in
-the job output — the VLAN must already exist on the VTP server for the SVI to
-come up. In **server** and **transparent** mode the VLAN is created locally.
+IOS rejects `vlan <n>` once a switch is in VTP client mode. A fresh switch is
+in server mode, so the play creates the management VLAN **before** applying any
+VTP setting, in every mode. Setting the VTP domain afterwards resets the
+switch's configuration revision to 0, so joining the domain cannot overwrite the
+existing VLAN database.
+
+In **client** mode the switch then adopts the VTP server's VLAN list. The VLAN
+created up front survives only if the server also has it; otherwise the next
+VTP advertisement removes it. The job output warns about this, and verification
+checks `show vlan id <n>` so a removed VLAN fails the run rather than passing
+silently. In **server** and **transparent** mode the VLAN stays as created.
 
 ## AWX setup
 
