@@ -38,11 +38,13 @@ the run before any configuration is pushed.
 
 ## What it configures
 
-Before any change, it confirms the device is a Layer 2 switch:
-`show interfaces switchport` must list at least one `Switchport: Enabled` port.
-A router such as a Catalyst 8000v returns nothing there, so it is refused with a
-message naming its model, and nothing is pushed. (`show vlan brief` is not used:
-the Catalyst 8000v accepts it and lists VLAN 1 despite rejecting `vlan <n>`.)
+Before any change, it confirms the device has a VLAN database: `show vlan` must
+succeed and list the default VLAN 1. A device without one is refused with a
+message naming its model, and nothing is pushed.
+
+This does not catch every router. A Catalyst 8000v lists VLAN 1 in `show vlan`
+but rejects `vlan <n>`, so it passes this check and fails at the management VLAN
+step, after the baseline has been applied (unsaved).
 
 Then, in this order:
 
@@ -163,7 +165,7 @@ from an AWX custom credential type — without editing the file.
 ## Safety and guards
 
 - Every survey answer is required and format-checked before NetBox is queried.
-- The device must have Layer 2 switchports; a router is refused before any
+- The device must have a VLAN database (`show vlan` lists VLAN 1) before any
   configuration is pushed.
 - The device must exist in NetBox exactly once, and carry at least one TRUNK
   uplink.

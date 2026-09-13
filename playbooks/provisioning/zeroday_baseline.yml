@@ -51,39 +51,36 @@
     - name: Gather IOS facts
       cisco.ios.ios_facts:
 
-    # Zero-day provisioning configures Layer 2 access switches: VLANs, VTP and
-    # switchport trunks. A router such as a Catalyst 8000v rejects `vlan <n>`
-    # and `switchport` part-way through a run, leaving partial unsaved config
-    # behind, so confirm the device has switchports before anything is pushed.
+    # Zero-day provisioning configures VLANs, VTP and switchport trunks, so the
+    # device must have a VLAN database. Read it with `show vlan` and require the
+    # default VLAN 1 row before anything is pushed.
     #
-    # `show vlan brief` is NOT a usable test: a Catalyst 8000v accepts it and
-    # lists VLAN 1. `show interfaces switchport` is: it returns nothing on that
-    # router, and lists "Switchport: Enabled" ports on an access switch. The
-    # check is a plain substring match. Platforms that reject the command
-    # outright raise a module exception that failed_when cannot catch, hence
-    # block/rescue.
-    - name: Confirm the device is a Layer 2 switch
+    # Limitation: some routers keep a VLAN table without being able to add to
+    # it. A Catalyst 8000v, for example, lists VLAN 1 here yet rejects
+    # `vlan <n>`, so it passes this check and fails later at "Create the
+    # management VLAN". A device that rejects `show vlan` outright raises a
+    # module exception that failed_when cannot catch, hence block/rescue.
+    - name: Confirm the device has a VLAN database
       block:
-        - name: Read the switchport capability
+        - name: Read the VLAN database
           cisco.ios.ios_command:
             commands:
-              - show interfaces switchport
-          register: zeroday_switchport
+              - show vlan
+          register: zeroday_vlan_db
 
-        - name: Require at least one Layer 2 switchport
+        - name: Require the default VLAN in the VLAN database
           ansible.builtin.assert:
             that:
-              - "'Switchport: Enabled' in zeroday_switchport.stdout[0]"
+              - "zeroday_vlan_db.stdout[0] is regex('^1\\s+default\\s', multiline=True)"
             quiet: true
       rescue:
-        - name: Refuse a device without Layer 2 switchports
+        - name: Refuse a device without a VLAN database
           ansible.builtin.fail:
             msg: >-
-              {{ zeroday_hostname }} is a {{ ansible_net_model | default('device of unknown model') }}
-              with no Layer 2 switchports ('show interfaces switchport' was
-              rejected or listed none). Zero-day provisioning configures access
-              switches - VLANs, VTP and switchport trunks - and cannot run on a
-              router. Nothing was changed on the device.
+              {{ zeroday_hostname }} ({{ ansible_net_model | default('unknown model') }})
+              has no usable VLAN database: 'show vlan' was rejected or did not
+              list the default VLAN 1. Zero-day provisioning configures VLANs,
+              VTP and switchport trunks. Nothing was changed on the device.
 
     - name: Capture the pre-provisioning state
       cisco.ios.ios_command:
