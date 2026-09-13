@@ -63,7 +63,7 @@ Then, in this order:
    where the platform rejects it.
 6. **Save** — once, at the end, and only if the running config changed.
 
-It then re-reads `show running-config`, `show vtp status` and `show vlan id <n>`, checks every item
+It then re-reads `show running-config`, `show vtp status` and `show vlan`, checks every item
 above, writes `reports/zeroday/<hostname>_zeroday.json`, and fails the job if
 any check did not pass.
 
@@ -91,7 +91,7 @@ existing VLAN database.
 In **client** mode the switch then adopts the VTP server's VLAN list. The VLAN
 created up front survives only if the server also has it; otherwise the next
 VTP advertisement removes it. The job output warns about this, and verification
-checks `show vlan id <n>` so a removed VLAN fails the run rather than passing
+checks `show vlan` so a removed VLAN fails the run rather than passing
 silently. In **server** and **transparent** mode the VLAN stays as created.
 
 ## AWX setup

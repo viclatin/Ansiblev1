@@ -213,7 +213,10 @@
         commands:
           - show running-config
           - show vtp status
-          - "show vlan id {{ zeroday_mgmt_vlan }}"
+          # `show vlan`, not `show vlan id <n>`: the latter is reported as a
+          # command error when the VLAN is absent, which would abort this
+          # capture instead of letting the mgmt_vlan check below record it.
+          - show vlan
       register: zeroday_post
 
     - name: Evaluate the provisioned configuration
