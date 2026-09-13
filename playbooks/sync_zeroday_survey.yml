@@ -1,0 +1,140 @@
+---
+# Refreshes the zero-day provisioning job template's Hostname dropdown from
+# NetBox. Separate from sync_survey_choices.yml, which builds its device list
+# from the AWX inventory: a zero-day switch has no primary IP, so nb_inventory
+# never emits it and it would never appear there.
+#
+# Offers NetBox devices whose status is in zeroday_candidate_statuses
+# (group_vars/zeroday_baseline.yml). Every other survey question is passed
+# through untouched.
+#
+# Attach a "Red Hat Ansible Automation Platform" credential (CONTROLLER_HOST,
+# CONTROLLER_OAUTH_TOKEN) and the NetBox API credential (NETBOX_API,
+# NETBOX_TOKEN). Supports --check: it reports the diff and posts nothing.
+- name: Sync the zero-day survey hostname choices from NetBox
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars_files:
+    - ../group_vars/zeroday_baseline.yml
+
+  vars:
+    awx_host: "{{ lookup('ansible.builtin.env', 'CONTROLLER_HOST') }}"
+    awx_token: "{{ lookup('ansible.builtin.env', 'CONTROLLER_OAUTH_TOKEN') }}"
+    awx_verify_ssl: "{{ lookup('ansible.builtin.env', 'CONTROLLER_VERIFY_SSL') | default('true', true) | bool }}"
+    netbox_api: "{{ lookup('ansible.builtin.env', 'NETBOX_API') | regex_replace('/$', '') }}"
+    netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+    # The zero-day job template whose survey is refreshed. No default: pointing
+    # this at the wrong template would rewrite someone else's survey.
+    zeroday_job_template_id: 0
+
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "Bearer {{ awx_token }}"
+        Content-Type: application/json
+      validate_certs: "{{ awx_verify_ssl }}"
+
+  tasks:
+    - name: Verify the AWX and NetBox credentials were injected
+      ansible.builtin.assert:
+        that:
+          - awx_host | length > 0
+          - awx_token | length > 0
+          - netbox_api | length > 0
+          - netbox_token | length > 0
+        fail_msg: >-
+          Missing credentials. Attach a "Red Hat Ansible Automation Platform"
+          credential and the NetBox API credential to this job template.
+        quiet: true
+
+    - name: Require the zero-day job template id
+      ansible.builtin.assert:
+        that:
+          - zeroday_job_template_id | int > 0
+        fail_msg: >-
+          Set zeroday_job_template_id to the id of the "Network - Zero-Day
+          Provisioning" job template, as an extra var on this job template.
+        quiet: true
+
+    # Task-level headers replace the AWX Bearer headers from module_defaults.
+    - name: Read candidate devices from NetBox
+      ansible.builtin.uri:
+        url: >-
+          {{ netbox_api }}/api/dcim/devices/?{{ zeroday_candidate_statuses | map('regex_replace', '^', 'status=') | join('&') }}&limit=0
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        validate_certs: false
+        status_code: [200]
+      register: zeroday_nb_candidates
+      check_mode: false
+      no_log: true
+
+    - name: Collect candidate hostnames
+      ansible.builtin.set_fact:
+        zeroday_candidates: "{{ zeroday_nb_candidates.json.results | map(attribute='name') | select | sort | list }}"
+
+    - name: Refuse to blank the dropdown
+      ansible.builtin.assert:
+        that:
+          - zeroday_candidates | length > 0
+        fail_msg: >-
+          No NetBox devices have status {{ zeroday_candidate_statuses | join(' or ') }}.
+          The survey was left untouched. Set a pre-staged switch's status to
+          one of those in NetBox.
+
+    - name: Read the current survey specification
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ zeroday_job_template_id }}/survey_spec/"
+        method: GET
+        return_content: true
+        status_code: [200]
+      register: awx_survey
+      check_mode: false
+
+    - name: Fail if the survey has no hostname question
+      ansible.builtin.assert:
+        that:
+          - awx_survey.json.spec | default([]) | selectattr('variable', 'eq', 'zeroday_hostname') | list | length > 0
+        fail_msg: >-
+          Job template {{ zeroday_job_template_id }} has no survey question with
+          variable 'zeroday_hostname'. This playbook refreshes an existing
+          question's choices; it does not create the question.
+
+    - name: Build the updated question list
+      ansible.builtin.set_fact:
+        updated_spec: >-
+          {{
+            updated_spec | default([]) + [
+              item | combine({
+                'choices': zeroday_candidates,
+                'default': item.default if item.default in zeroday_candidates else ''
+              })
+              if item.variable == 'zeroday_hostname'
+              else item
+            ]
+          }}
+      loop: "{{ awx_survey.json.spec }}"
+      loop_control:
+        label: "{{ item.variable }}"
+
+    - name: Report the pending change
+      ansible.builtin.debug:
+        msg:
+          - "candidates in NetBox: {{ zeroday_candidates | join(', ') }}"
+          - "hostnames in survey : {{ (awx_survey.json.spec | selectattr('variable', 'eq', 'zeroday_hostname') | first).choices | default([]) | join(', ') }}"
+
+    - name: Update the survey specification
+      ansible.builtin.uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ zeroday_job_template_id }}/survey_spec/"
+        method: POST
+        body_format: json
+        body: "{{ awx_survey.json | combine({'spec': updated_spec}) }}"
+        status_code: [200, 201]
+      when:
+        - not ansible_check_mode
+        - updated_spec != awx_survey.json.spec
+      changed_when: true
