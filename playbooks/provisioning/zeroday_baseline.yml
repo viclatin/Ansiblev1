@@ -3,8 +3,8 @@
 # which validates the survey, resolves NetBox and add_host's the switch into
 # zeroday_targets at its temporary address. Not meant to be run on its own.
 #
-# Order matters: organisational standards first, then survey-driven values,
-# then the uplinks. Configuration is saved once, at the end.
+# Order matters: organisational standards first, then the management VLAN,
+# then VTP, then the SVI and uplinks. Configuration is saved once, at the end.
 #
 # This directory carries group_vars/host_vars symlinks like every other
 # playbooks/ subdirectory (see group_vars/platforms_ios.yml). The connection
@@ -96,6 +96,19 @@
         lines:
           - transport input ssh
 
+    # The management VLAN is created BEFORE any VTP command, whatever mode the
+    # survey chose. A fresh switch is in VTP server mode and can create VLANs;
+    # once it is a client, IOS rejects `vlan <n>`. Setting the VTP domain
+    # afterwards also resets the configuration revision to 0, so this switch
+    # cannot overwrite the domain's VLAN database when it joins.
+    - name: Create the management VLAN
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "vlan {{ zeroday_mgmt_vlan }}"
+        lines:
+          - "name {{ zeroday_mgmt_vlan_name }}"
+
     - name: Apply VTP settings
       cisco.ios.ios_config:
         save_when: never
@@ -105,23 +118,17 @@
           - "vtp password {{ zeroday_vtp_password }}"
       no_log: true
 
-    # IOS rejects `vlan <n>` in VTP client mode. There the management VLAN must
-    # be served by the VTP server; the SVI is still configured locally.
-    - name: Create the management VLAN
-      cisco.ios.ios_config:
-        save_when: never
-        parents:
-          - "vlan {{ zeroday_mgmt_vlan }}"
-        lines:
-          - "name {{ zeroday_mgmt_vlan_name }}"
-      when: zeroday_vtp_mode != 'client'
-
-    - name: Note that the management VLAN must come from the VTP server
+    # A client takes its VLAN database from the VTP server. The VLAN created
+    # above survives only if the server also has it; otherwise the next
+    # advertisement removes it, which the verification below reports.
+    - name: Note that a VTP client keeps the management VLAN only if the server has it
       ansible.builtin.debug:
         msg: >-
-          VTP mode is client, so VLAN {{ zeroday_mgmt_vlan }} was not created
-          locally - IOS does not allow it. It must exist on the VTP server for
-          Vlan{{ zeroday_mgmt_vlan }} to come up.
+          VTP mode is client. VLAN {{ zeroday_mgmt_vlan }} was created before
+          joining the domain, but a client adopts the VTP server's VLAN list:
+          VLAN {{ zeroday_mgmt_vlan }} must also exist on the VTP server for
+          domain '{{ zeroday_vtp_domain }}', or it will be removed on the next
+          VTP update.
       when: zeroday_vtp_mode == 'client'
 
     - name: Configure the management SVI
@@ -172,6 +179,7 @@
         commands:
           - show running-config
           - show vtp status
+          - "show vlan id {{ zeroday_mgmt_vlan }}"
       register: zeroday_post
 
     - name: Evaluate the provisioned configuration
@@ -186,6 +194,7 @@
           ssh_only_vty: "{{ zeroday_post.stdout[0] is regex('^line vty 0 4\\n(?: [^\\n]*\\n)*? transport input ssh$', multiline=True) }}"
           vtp_domain: "{{ zeroday_post.stdout[1] is regex('VTP Domain Name\\s*:\\s*' ~ (zeroday_vtp_domain | regex_escape) ~ '\\s*$', multiline=True) }}"
           vtp_mode: "{{ zeroday_post.stdout[1] is regex('VTP Operating Mode\\s*:\\s*' ~ zeroday_vtp_mode, multiline=True, ignorecase=True) }}"
+          mgmt_vlan: "{{ zeroday_post.stdout[2] is regex('^' ~ zeroday_mgmt_vlan ~ '\\s+\\S+\\s+active', multiline=True) }}"
           mgmt_svi: >-
             {{ zeroday_post.stdout[0] is regex('^interface Vlan' ~ zeroday_mgmt_vlan ~ '\n(?: [^\n]*\n)*? ip address '
             ~ (zeroday_mgmt_address | regex_escape) ~ ' ' ~ (zeroday_mgmt_netmask | regex_escape) ~ '$', multiline=True) }}
