@@ -27,6 +27,16 @@ zeroday_trunk_description: Uplink-trunk-link
 
 zeroday_mgmt_vlan_name: MANAGEMENT
 
+# Models that are routers rather than Layer 2 switches, matched against the
+# model ios_facts reports (ansible_net_model). They have no `vlan` or
+# `switchport` commands, so the management VLAN is built as a bridge-domain
+# with a BDI interface, each TRUNK uplink joins it through an 802.1Q service
+# instance, and the gateway is a static default route. Proven on a Catalyst
+# 8000v running IOS-XE 17.16.
+zeroday_router_models:
+  - C8000V
+  - CSR1000V
+
 # NetBox device statuses offered in the survey's hostname dropdown. Staged
 # only: a Planned switch is not racked or reachable yet, and an Active one is
 # in production and must never be re-provisioned by mistake.

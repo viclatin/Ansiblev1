@@ -64,6 +64,24 @@ any check did not pass.
 
 **Not configured yet, by decision:** 802.1x, TACACS, password policy, banner.
 
+### Routers (Catalyst 8000v, CSR1000v)
+
+A router has no `vlan` or `switchport` commands, so on a model listed in
+`zeroday_router_models` the play builds the same result with router
+equivalents. The model comes from `ansible_net_model`, reported by
+`ios_facts`; nothing is read to decide the path.
+
+| On a switch | On a router |
+| --- | --- |
+| `vlan <n>` / `name MANAGEMENT` | `bridge-domain <n>` |
+| `interface Vlan<n>` + address | `interface BDI<n>` + address |
+| uplink `switchport mode trunk` | uplink `service instance <n> ethernet`, `encapsulation dot1q <n>`, `rewrite ingress tag pop 1 symmetric`, `bridge-domain <n>` |
+| `ip default-gateway <gw>` | `ip route 0.0.0.0 0.0.0.0 <gw>` (a routing device ignores `ip default-gateway`) |
+
+The baseline, VTY and VTP steps are identical on both. Verification checks the
+equivalents — the bridge-domain, `BDI<n>`'s address, each uplink's service
+instance and the static route — and the report records which path ran.
+
 ### The temporary address is left in place
 
 The final management address goes on the management SVI, but the temporary
