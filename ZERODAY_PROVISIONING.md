@@ -38,7 +38,15 @@ the run before any configuration is pushed.
 
 ## What it configures
 
-In this order:
+Before any change, it confirms the device has a VLAN database: `show vlan` must
+succeed and list the default VLAN 1. A device without one is refused with a
+message naming its model, and nothing is pushed.
+
+This does not catch every router. A Catalyst 8000v lists VLAN 1 in `show vlan`
+but rejects `vlan <n>`, so it passes this check and fails at the management VLAN
+step, after the baseline has been applied (unsaved).
+
+Then, in this order:
 
 1. **Organisational baseline** — not survey fields. Deliberately identical to
    what `group_vars/standards.yml` scores, so a freshly provisioned switch
@@ -57,7 +65,7 @@ In this order:
    where the platform rejects it.
 6. **Save** — once, at the end, and only if the running config changed.
 
-It then re-reads `show running-config`, `show vtp status` and `show vlan id <n>`, checks every item
+It then re-reads `show running-config`, `show vtp status` and `show vlan`, checks every item
 above, writes `reports/zeroday/<hostname>_zeroday.json`, and fails the job if
 any check did not pass.
 
@@ -85,7 +93,7 @@ existing VLAN database.
 In **client** mode the switch then adopts the VTP server's VLAN list. The VLAN
 created up front survives only if the server also has it; otherwise the next
 VTP advertisement removes it. The job output warns about this, and verification
-checks `show vlan id <n>` so a removed VLAN fails the run rather than passing
+checks `show vlan` so a removed VLAN fails the run rather than passing
 silently. In **server** and **transparent** mode the VLAN stays as created.
 
 ## AWX setup
@@ -157,6 +165,8 @@ from an AWX custom credential type — without editing the file.
 ## Safety and guards
 
 - Every survey answer is required and format-checked before NetBox is queried.
+- The device must have a VLAN database (`show vlan` lists VLAN 1) before any
+  configuration is pushed.
 - The device must exist in NetBox exactly once, and carry at least one TRUNK
   uplink.
 - The temporary address is never removed, and the run refuses if configuring
