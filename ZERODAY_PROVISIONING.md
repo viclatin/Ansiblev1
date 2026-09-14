@@ -191,3 +191,37 @@ from an AWX custom credential type — without editing the file.
 the repository root, like every other subdirectory under `playbooks/`. See
 `group_vars/platforms_ios.yml` for why a subdirectory without them silently
 loses its connection settings.
+
+## Troubleshooting
+
+### `Incompatible ssh peer (no acceptable kex algorithm)`
+
+The job fails at "Gather IOS facts" before logging in. IOS 15.2 — including
+IOSvL2 — offers only SHA-1 key exchange (`diffie-hellman-group-exchange-sha1`,
+`diffie-hellman-group14-sha1`, `diffie-hellman-group1-sha1`) and an `ssh-rsa`
+host key. AWX's execution environment has no `ansible-pylibssh`, so
+`network_cli` connects with paramiko, and paramiko 5.0 removed SHA-1 key
+exchange. The switch cannot be fixed instead: IOS 15.2 has no SHA-2 key
+exchange to enable.
+
+The fix is an execution environment with paramiko below 5, which still offers
+the SHA-1 methods alongside the SHA-2 ones IOS-XE uses:
+
+| | Value |
+| --- | --- |
+| Image | `192.168.1.95:5000/awx-netbox-ee:paramiko4-20260914` |
+| AWX execution environment | `awx-netbox-ee (paramiko<5, legacy SSH)` |
+| Assigned to | Network - Zero-Day Provisioning only |
+| Definition | `execution-environments/awx-netbox-ee-paramiko4/Dockerfile` |
+
+It is the previous `awx-netbox-ee:latest`, pinned by digest, with only the
+paramiko pin added. Rebuild and push with:
+
+```bash
+docker build -t 192.168.1.95:5000/awx-netbox-ee:paramiko4-<date> execution-environments/awx-netbox-ee-paramiko4
+docker push 192.168.1.95:5000/awx-netbox-ee:paramiko4-<date>
+```
+
+Every other job template still uses `awx-netbox-ee:latest` (paramiko 5.0), so a
+compliance or remediation run against an IOS 15.2 switch fails the same way
+until it is moved to this environment too.
