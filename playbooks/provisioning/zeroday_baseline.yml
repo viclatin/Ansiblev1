@@ -6,6 +6,11 @@
 # Order matters: organisational standards first, then the management VLAN,
 # then VTP, then the SVI and uplinks. Configuration is saved once, at the end.
 #
+# Two paths, chosen from the model ios_facts reports. A switch gets `vlan`, an
+# SVI and switchport trunks. A router listed in zeroday_router_models has none
+# of those commands, so it gets the equivalents: `bridge-domain`, a BDI
+# interface, an 802.1Q service instance per uplink and a static default route.
+#
 # This directory carries group_vars/host_vars symlinks like every other
 # playbooks/ subdirectory (see group_vars/platforms_ios.yml). The connection
 # settings used here are set on add_host and do not depend on them, but a new
@@ -36,6 +41,8 @@
           (zeroday_mgmt_mask_int | int) % 256
         ] | join('.')
       }}
+    zeroday_is_router: "{{ (ansible_net_model | default('') | upper) in zeroday_router_models }}"
+    zeroday_mgmt_interface: "{{ ('BDI' if zeroday_is_router | bool else 'Vlan') ~ zeroday_mgmt_vlan }}"
 
   tasks:
     - name: Ensure zero-day backup and report directories exist
@@ -50,6 +57,14 @@
 
     - name: Gather IOS facts
       cisco.ios.ios_facts:
+
+    - name: Report the provisioning path for this platform
+      ansible.builtin.debug:
+        msg: >-
+          {{ zeroday_hostname }} is a {{ ansible_net_model | default('device of unknown model') }}:
+          {{ 'router path - bridge-domain, BDI' ~ zeroday_mgmt_vlan ~ ', service instances and a static default route'
+             if zeroday_is_router | bool
+             else 'switch path - VLAN, SVI Vlan' ~ zeroday_mgmt_vlan ~ ', switchport trunks and ip default-gateway' }}
 
     - name: Capture the pre-provisioning state
       cisco.ios.ios_command:
@@ -70,15 +85,16 @@
         mode: "0600"
 
     # The temporary address stays in place so this session survives. If it
-    # already lives on the management SVI, configuring the final address would
-    # replace it and cut the connection mid-run, so refuse before any change.
+    # already lives on the management interface (SVI Vlan<n>, or BDI<n> on a
+    # router), configuring the final address would replace it and cut the
+    # connection mid-run, so refuse before any change.
     - name: Refuse when the temporary address is on the management SVI
       ansible.builtin.assert:
         that:
-          - not (zeroday_pre.stdout[1] is regex('^Vlan' ~ zeroday_mgmt_vlan ~ '\s+' ~ (zeroday_temp_ip | regex_escape) ~ '\s', multiline=True))
+          - not (zeroday_pre.stdout[1] is regex('^' ~ zeroday_mgmt_interface ~ '\s+' ~ (zeroday_temp_ip | regex_escape) ~ '\s', multiline=True))
         fail_msg: >-
           The temporary address {{ zeroday_temp_ip }} is already configured on
-          Vlan{{ zeroday_mgmt_vlan }}, the management SVI. Setting the final
+          {{ zeroday_mgmt_interface }}, the management interface. Setting the final
           address there would replace it and drop this session. Stage the
           switch with its temporary address on a different VLAN.
         quiet: true
@@ -96,12 +112,11 @@
         lines:
           - transport input ssh
 
-    # The management VLAN is sent with no pre-check and no condition, BEFORE any
-    # VTP command, whatever mode the survey chose. A device whose software has
-    # no `vlan` command (a router such as a Catalyst 8000v) fails the run here. A fresh switch is in VTP server mode and can create VLANs;
-    # once it is a client, IOS rejects `vlan <n>`. Setting the VTP domain
-    # afterwards also resets the configuration revision to 0, so this switch
-    # cannot overwrite the domain's VLAN database when it joins.
+    # Switch: the management VLAN is sent with no pre-check, BEFORE any VTP
+    # command, whatever mode the survey chose. A fresh switch is in VTP server
+    # mode and can create VLANs; once it is a client, IOS rejects `vlan <n>`.
+    # Setting the VTP domain afterwards also resets the configuration revision
+    # to 0, so this switch cannot overwrite the domain's VLAN database.
     - name: Create the management VLAN
       cisco.ios.ios_config:
         save_when: never
@@ -109,6 +124,16 @@
           - "vlan {{ zeroday_mgmt_vlan }}"
         lines:
           - "name {{ zeroday_mgmt_vlan_name }}"
+      when: not (zeroday_is_router | bool)
+
+    # Router: there is no `vlan` command. A bridge-domain is the equivalent
+    # Layer 2 domain, and BDI<n> below is its routed interface.
+    - name: Create the management bridge-domain
+      cisco.ios.ios_config:
+        save_when: never
+        lines:
+          - "bridge-domain {{ zeroday_mgmt_vlan }}"
+      when: zeroday_is_router | bool
 
     - name: Apply VTP settings
       cisco.ios.ios_config:
@@ -130,13 +155,15 @@
           VLAN {{ zeroday_mgmt_vlan }} must also exist on the VTP server for
           domain '{{ zeroday_vtp_domain }}', or it will be removed on the next
           VTP update.
-      when: zeroday_vtp_mode == 'client'
+      when:
+        - zeroday_vtp_mode == 'client'
+        - not (zeroday_is_router | bool)
 
     - name: Configure the management SVI
       cisco.ios.ios_config:
         save_when: never
         parents:
-          - "interface Vlan{{ zeroday_mgmt_vlan }}"
+          - "interface {{ zeroday_mgmt_interface }}"
         lines:
           - "ip address {{ zeroday_mgmt_address }} {{ zeroday_mgmt_netmask }}"
           - no shutdown
@@ -146,9 +173,22 @@
         save_when: never
         lines:
           - "ip default-gateway {{ zeroday_gateway }}"
+      when: not (zeroday_is_router | bool)
+
+    # A router with IP routing enabled ignores `ip default-gateway`. The static
+    # route (distance 1) takes over from a DHCP default route (distance 254)
+    # once the gateway is reachable; the session on the temporary address rides
+    # its connected subnet, so it is unaffected.
+    - name: Set the default route
+      cisco.ios.ios_config:
+        save_when: never
+        lines:
+          - "ip route 0.0.0.0 0.0.0.0 {{ zeroday_gateway }}"
+      when: zeroday_is_router | bool
 
     # Platforms that only support 802.1Q reject this command outright, which
-    # is harmless, so a rejection does not fail the run.
+    # is harmless. A rejected command raises a module exception that
+    # failed_when cannot catch, so ignore_errors is used.
     - name: Set 802.1Q trunk encapsulation where the platform requires it
       cisco.ios.ios_config:
         save_when: never
@@ -158,7 +198,8 @@
           - switchport trunk encapsulation dot1q
       loop: "{{ zeroday_trunk_interfaces }}"
       register: zeroday_encapsulation
-      failed_when: false
+      ignore_errors: true
+      when: not (zeroday_is_router | bool)
 
     - name: Configure the NetBox-tagged uplinks as trunks
       cisco.ios.ios_config:
@@ -170,6 +211,33 @@
           - switchport mode trunk
           - no shutdown
       loop: "{{ zeroday_trunk_interfaces }}"
+      when: not (zeroday_is_router | bool)
+
+    - name: Bring up the NetBox-tagged uplinks
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "interface {{ item }}"
+        lines:
+          - "description {{ zeroday_trunk_description }}"
+          - no shutdown
+      loop: "{{ zeroday_trunk_interfaces }}"
+      when: zeroday_is_router | bool
+
+    # Router equivalent of a trunk carrying the management VLAN: an 802.1Q
+    # service instance that strips the tag and joins the bridge-domain.
+    - name: Attach each uplink to the management bridge-domain
+      cisco.ios.ios_config:
+        save_when: never
+        parents:
+          - "interface {{ item }}"
+          - "service instance {{ zeroday_mgmt_vlan }} ethernet"
+        lines:
+          - "encapsulation dot1q {{ zeroday_mgmt_vlan }}"
+          - rewrite ingress tag pop 1 symmetric
+          - "bridge-domain {{ zeroday_mgmt_vlan }}"
+      loop: "{{ zeroday_trunk_interfaces }}"
+      when: zeroday_is_router | bool
 
     - name: Save the configuration
       cisco.ios.ios_config:
@@ -195,9 +263,17 @@
           vtp_domain: "{{ zeroday_post.stdout[1] is regex('VTP Domain Name\\s*:\\s*' ~ (zeroday_vtp_domain | regex_escape) ~ '\\s*$', multiline=True) }}"
           vtp_mode: "{{ zeroday_post.stdout[1] is regex('VTP Operating Mode\\s*:\\s*' ~ zeroday_vtp_mode, multiline=True, ignorecase=True) }}"
           mgmt_svi: >-
-            {{ zeroday_post.stdout[0] is regex('^interface Vlan' ~ zeroday_mgmt_vlan ~ '\n(?: [^\n]*\n)*? ip address '
+            {{ zeroday_post.stdout[0] is regex('^interface ' ~ zeroday_mgmt_interface ~ '\n(?: [^\n]*\n)*? ip address '
             ~ (zeroday_mgmt_address | regex_escape) ~ ' ' ~ (zeroday_mgmt_netmask | regex_escape) ~ '$', multiline=True) }}
-          default_gateway: "{{ zeroday_post.stdout[0] is regex('^ip default-gateway ' ~ (zeroday_gateway | regex_escape) ~ '$', multiline=True) }}"
+          default_gateway: >-
+            {{ zeroday_post.stdout[0] is regex(
+                 '^' ~ (('ip route 0.0.0.0 0.0.0.0 ' if zeroday_is_router | bool else 'ip default-gateway ') | regex_escape)
+                 ~ (zeroday_gateway | regex_escape) ~ '$', multiline=True) }}
+
+    - name: Evaluate the management bridge-domain
+      ansible.builtin.set_fact:
+        zeroday_checks: "{{ zeroday_checks | combine({'mgmt_bridge_domain': zeroday_post.stdout[0] is regex('^bridge-domain ' ~ zeroday_mgmt_vlan ~ ' *$', multiline=True)}) }}"
+      when: zeroday_is_router | bool
 
     - name: Evaluate each uplink
       ansible.builtin.set_fact:
@@ -211,6 +287,23 @@
             })
           }}
       loop: "{{ zeroday_trunk_interfaces }}"
+      when: not (zeroday_is_router | bool)
+
+    - name: Evaluate each uplink on a router
+      ansible.builtin.set_fact:
+        zeroday_checks: >-
+          {{
+            zeroday_checks | combine({
+              'uplink ' ~ item:
+                (zeroday_post.stdout[0] is regex('^interface ' ~ (item | regex_escape) ~ '\n(?: [^\n]*\n)*? service instance ' ~ zeroday_mgmt_vlan ~ ' ethernet\n(?:  [^\n]*\n)*?  encapsulation dot1q ' ~ zeroday_mgmt_vlan ~ ' *$', multiline=True))
+                and
+                (zeroday_post.stdout[0] is regex('^interface ' ~ (item | regex_escape) ~ '\n(?: [^\n]*\n)*? service instance ' ~ zeroday_mgmt_vlan ~ ' ethernet\n(?:  [^\n]*\n)*?  bridge-domain ' ~ zeroday_mgmt_vlan ~ ' *$', multiline=True))
+                and
+                (zeroday_post.stdout[0] is regex('^interface ' ~ (item | regex_escape) ~ '\n(?: [^\n]*\n)*? description ' ~ (zeroday_trunk_description | regex_escape) ~ '$', multiline=True))
+            })
+          }}
+      loop: "{{ zeroday_trunk_interfaces }}"
+      when: zeroday_is_router | bool
 
     - name: Collect failed checks
       ansible.builtin.set_fact:
@@ -221,6 +314,9 @@
       ansible.builtin.set_fact:
         zeroday_report:
           hostname: "{{ zeroday_hostname }}"
+          model: "{{ ansible_net_model | default('') }}"
+          provisioning_path: "{{ 'router' if zeroday_is_router | bool else 'switch' }}"
+          management_interface: "{{ zeroday_mgmt_interface }}"
           netbox_device_id: "{{ zeroday_netbox_device_id }}"
           timestamp: "{{ lookup('ansible.builtin.pipe', 'date -Iseconds') }}"
           check_mode: "{{ ansible_check_mode }}"
