@@ -1,0 +1,38 @@
+# Formatting is the one check HCP Terraform does not already perform.
+#
+# The workspace is VCS-driven: HCP runs a speculative plan on every pull request
+# and a plan on every push to the default branch, and a plan necessarily parses
+# and validates the configuration. Running init/validate here too would only
+# duplicate that -- and would require an HCP token as a repository secret. So
+# this workflow deliberately stops at `terraform fmt`, which needs no
+# credentials at all.
+
+name: terraform-ci
+
+# Runs on every branch push, not just main: a feature branch is exactly where a
+# formatting mistake should surface, before a pull request exists. Pull requests
+# stay in the trigger list so that PRs opened from forks -- whose pushes do not
+# run workflows in this repository -- are still checked.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.1
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive -diff

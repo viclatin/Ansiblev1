@@ -1,0 +1,30 @@
+# Local Terraform working files
+.terraform/
+.terraform.lock.hcl.bak
+crash.log
+crash.*.log
+
+# State should never be committed -- HCP Terraform holds it remotely
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Variable files often carry secrets; set values on the HCP workspace instead
+*.tfvars
+*.tfvars.json
+!example.tfvars
+
+# Credentials
+*.pem
+*.key
+credentials.tfrc.json
+.terraformrc
+terraform.rc
+
+# Plan artifacts
+*.tfplan
+*.tfplan.*
+
+# Editor / OS noise
+.DS_Store
+*.swp
