@@ -81,7 +81,7 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 pydantic==2.13.4
 pydantic-ai==2.14.0
-pydantic-ai-slim==2.14.0
+pydantic-ai-slim==2.53.0
 pydantic-evals==2.14.0
 pydantic-graph==2.14.0
 pydantic-settings==2.14.2
