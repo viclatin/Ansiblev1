@@ -7,7 +7,7 @@ anthropic==0.117.0
 anyio==4.14.2
 argcomplete==3.7.0
 attrs==26.1.0
-Authlib==1.7.2
+Authlib==1.9.1
 beartype==0.22.9
 black==26.5.1
 bracex==3.0.1
